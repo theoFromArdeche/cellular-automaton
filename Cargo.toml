@@ -1,0 +1,6 @@
+[package]
+name = "projet-automates-cellulaires"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
