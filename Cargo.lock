@@ -94,7 +94,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "trait-AC"
+name = "trait-ac"
 version = "0.1.0"
 dependencies = [
  "rand",
