@@ -26,14 +26,12 @@ impl Grid {
         }
     }
 
-
     /// Get a position (row, col), wrapping around (toroidal grid)
     pub fn get_position(&self, row: isize, col: isize) -> (usize, usize) {
-        let wrapped_row = ((row % self.height as isize + self.height as isize) % self.height as isize) as usize;
-        let wrapped_col = ((col % self.width as isize + self.width as isize) % self.width as isize) as usize;
+        let wrapped_row = row.rem_euclid(self.height as isize) as usize;
+        let wrapped_col = col.rem_euclid(self.width as isize) as usize;
         (wrapped_row, wrapped_col)
     }
-
 
     /// Get a cell at position (row, col), wrapping around (toroidal grid)
     pub fn get_cell(&self, row: isize, col: isize) -> &Cell {
