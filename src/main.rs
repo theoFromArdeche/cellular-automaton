@@ -1,14 +1,15 @@
+use trait_AC::neighborhood::Neighborhood;
 use trait_AC::grid::Grid;
 use trait_AC::rules::{RuleSet, rule_diffusion, rule_average, rule_conway, rule_maximum, rule_oscillate};
-use trait_AC::movement::{apply_movement, movement_static, movement_random, movement_gradient};
+use trait_AC::movement::{apply_movement, movement_static};
 use trait_AC::utils::{print_active_traits, print_statistics, print_separator, semantic_trait_names};
 
 fn main() {
     println!("=== Modular Cellular Automata Simulation ===\n");
 
     // Configuration
-    let grid_width = 10;
     let grid_height = 10;
+    let grid_width = 10;
     let timesteps = 5;
 
     // Define which traits are active (3x3 boolean grid)
@@ -26,8 +27,25 @@ fn main() {
         vec![true,  true,  true],
     ];
 
+    let neighborhood_height = neighborhood_mask.len();
+    let neighborhood_width = neighborhood_mask[0].len();
+    let neighborhood_center_row = (neighborhood_height-1)/2;
+    let neighborhood_center_col = (neighborhood_width-1)/2;
+
     // Initialize grid
-    let mut grid = Grid::new(grid_width, grid_height, neighborhood_mask);
+    let mut grid = Grid::new(grid_width, grid_height);
+
+    // Default neighborhood
+    let dummy_grid = Grid::new(grid_width, grid_height); // can't use the normal grid because of the lifetime
+    let neighborhood_base = Neighborhood::new(
+        neighborhood_width,
+        neighborhood_height,
+        neighborhood_center_row,
+        neighborhood_center_col,
+        0, 0,
+        &neighborhood_mask,
+        &dummy_grid,
+    );
 
     // Define trait names
     let trait_names = semantic_trait_names();
@@ -76,7 +94,7 @@ fn main() {
             let mut new_row = Vec::new();
             for col in 0..grid.width {
                 let cell = &grid.cells[row][col];
-                let neighbors = grid.get_neighbors(row, col);
+                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &grid);
                 let mut new_cell = cell.clone();
 
                 // Update only active traits
@@ -84,7 +102,7 @@ fn main() {
                     for mask_col in 0..3 {
                         if active_mask[mask_row][mask_col] {
                             let trait_idx = mask_row * 3 + mask_col;
-                            let new_value = ruleset.apply_rule(trait_idx, cell, &neighbors);
+                            let new_value = ruleset.apply_rule(trait_idx, cell, &neighborhood);
                             new_cell.set_trait(trait_idx, new_value);
                         }
                     }
@@ -97,7 +115,7 @@ fn main() {
         grid.update_cells(new_cells);
 
         // Step 2: Apply movement
-        let moved_cells = apply_movement(&grid, movement_fn);
+        let moved_cells = apply_movement(&grid, &neighborhood_base, movement_fn);
         grid.update_cells(moved_cells);
 
         // Print results

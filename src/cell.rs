@@ -16,6 +16,15 @@ impl Cell {
         }
     }
 
+    /// Create an empty cell (used as placeholder in neighborhoods)
+    pub fn empty() -> &'static Cell {
+        static EMPTY_CELL: Cell = Cell {
+            fingerprint: [0.0; 9],
+            position: (0, 0),
+        };
+        &EMPTY_CELL
+    }
+
     /// Create a cell with random trait values
     pub fn random(position: (usize, usize)) -> Self {
         let mut rng = rand::thread_rng();
