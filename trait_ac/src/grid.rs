@@ -1,4 +1,5 @@
 use crate::cell::Cell;
+use rand::Rng;
 
 /// Represents a 2D grid of cells
 pub struct Grid {
@@ -56,6 +57,20 @@ impl Grid {
             .flat_map(|row| row.iter().map(|cell| cell.get_trait(trait_index)))
             .collect()
     }
+
+    /// Randomize grid
+    pub fn randomize(&mut self) {
+        let mut rng = rand::thread_rng();
+
+        for row in &mut self.cells {
+            for cell in row {
+                for i in 0..cell.fingerprint.len() {
+                    cell.set_trait(i, rng.gen_range(0.0..=1.0));
+                }
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]
