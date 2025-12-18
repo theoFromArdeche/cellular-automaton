@@ -44,7 +44,7 @@ fn main() {
     let nbhr_movement_center_col = (nbhr_movement_width-1)/2;
 
     // Initialize grid
-    let mut grid = Grid::new(grid_width, grid_height);
+    let mut grid = Grid::new_with_density(grid_width, grid_height, 0.1);
 
     // Default neighborhood
     let dummy_grid = Grid::new(grid_width, grid_height); // can't use the normal grid because of the lifetime
@@ -115,8 +115,12 @@ fn main() {
             let mut new_row = Vec::new();
             for col in 0..grid.width {
                 let cell = &grid.cells[row][col];
-                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &grid);
                 let mut new_cell = cell.clone();
+                if new_cell.is_empty() {
+                    new_row.push(new_cell);
+                    continue;
+                }
+                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &grid);
 
                 // Update only active traits
                 for mask_row in 0..3 {

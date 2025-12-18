@@ -14,8 +14,9 @@ pub fn rule_average(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Use mask to check if this cell is in the neighborhood
-            if neighborhood.mask[delta_row][delta_col] {
+            if neighborhood.mask[delta_row][delta_col] &&
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 sum += neighbor.get_trait(trait_index);
                 count += 1;
             }
@@ -35,9 +36,10 @@ pub fn rule_conway(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize)
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Skip the center cell and use mask to check if this cell is in the neighborhood
             if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) {
+               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 if neighbor.get_trait(trait_index) > 0.5 {
                     alive_neighbors += 1;
                 }
@@ -71,9 +73,10 @@ pub fn rule_diffusion(cell: &Cell, neighborhood: &Neighborhood, trait_index: usi
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Skip the center cell and use mask to check if this cell is in the neighborhood
             if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) {
+               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 sum += neighbor.get_trait(trait_index);
                 count += 1;
             }
@@ -99,8 +102,9 @@ pub fn rule_maximum(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Use mask to check if this cell is in the neighborhood
-            if neighborhood.mask[delta_row][delta_col] {
+            if neighborhood.mask[delta_row][delta_col] && 
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 max_neighbor = max_neighbor.max(neighbor.get_trait(trait_index));
                 found_any = true;
             }
@@ -123,9 +127,10 @@ pub fn rule_oscillate(cell: &Cell, neighborhood: &Neighborhood, trait_index: usi
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Skip the center cell and use mask to check if this cell is in the neighborhood
             if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) {
+               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 sum += neighbor.get_trait(trait_index);
                 count += 1;
             }
@@ -150,9 +155,10 @@ pub fn rule_weighted_average(cell: &Cell, neighborhood: &Neighborhood, trait_ind
     
     for (delta_row, row) in neighborhood.cells.iter().enumerate() {
         for (delta_col, neighbor) in row.iter().enumerate() {
-            // Skip the center cell and use mask to check if this cell is in the neighborhood
             if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) {
+               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
+               !neighborhood.cells[delta_row][delta_col].is_empty() {
+
                 // Calculate distance from center
                 let dr = (delta_row as isize - neighborhood.center_row as isize).abs() as f32;
                 let dc = (delta_col as isize - neighborhood.center_col as isize).abs() as f32;
@@ -194,7 +200,7 @@ pub fn rule_von_neumann(cell: &Cell, neighborhood: &Neighborhood, trait_index: u
         if let (Some(dr), Some(dc)) = (row_opt, col_opt) {
             if dr < neighborhood.height && dc < neighborhood.width {
                 // Use mask to check if this cell is in the neighborhood
-                if neighborhood.mask[dr][dc] {
+                if neighborhood.mask[dr][dc] && !neighborhood.cells[dr][dc].is_empty() {
                     let neighbor = &neighborhood.cells[dr][dc];
                     sum += neighbor.get_trait(trait_index);
                     count += 1;

@@ -72,7 +72,9 @@ pub fn movement_avoid_crowding(_cell: &Cell, nbhr_movement: &Neighborhood) -> (i
 
     for (dr, row) in nbhr_movement.cells.iter().enumerate() {
         for (dc, neighbor) in row.iter().enumerate() {
-            if nbhr_movement.mask[dr][dc] && !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
+            if nbhr_movement.mask[dr][dc] &&
+               !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
+
                 sum += neighbor.get_trait(0);
                 count += 1;
             }
@@ -121,7 +123,10 @@ pub fn movement_trait_based(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize
 
     for (dr, row) in nbhr_movement.cells.iter().enumerate() {
         for (dc, neighbor) in row.iter().enumerate() {
-            if nbhr_movement.mask[dr][dc] && !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
+            if nbhr_movement.mask[dr][dc] &&
+               !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) &&
+               !nbhr_movement.cells[dr][dc].is_empty() {
+
                 sum += neighbor.get_trait(0);
                 count += 1;
             }
@@ -178,6 +183,7 @@ pub fn movement_trait_based(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize
 enum ResolveState {
     Unvisited,
     Visiting,      // Currently processing (detects cycles)
+    Empty,
     Resolved(bool), // Result: true = moving, false = staying
 }
 
@@ -189,13 +195,20 @@ pub fn apply_movement(movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
     let height = grid.height;
     let width = grid.width;
 
+    let mut reserved: Vec<Vec<Option<(usize, usize)>>> = vec![vec![None; width]; height];
+    let mut states = vec![vec![ResolveState::Unvisited; width]; height]; // this cell can do its move or no (or we don't know yet)
+
     // 1. Calculate Intentions
     // intentions[r][c] = (target_row, target_col)
     let mut intentions = vec![vec![(0, 0); width]; height];
-
     for r in 0..height {
         for c in 0..width {
             let cell = &grid.cells[r][c];
+            if cell.is_empty() {
+                states[r][c] = ResolveState::Empty;
+                continue;
+            }
+
             let nbhr_movement = Neighborhood::new_from_base(r, c, nbhr_movement_base, grid);
             let (dr, dc) = movement_fn(cell, &nbhr_movement);
 
@@ -227,9 +240,6 @@ pub fn apply_movement(movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
 
     // 2. Resolve Movement Logic
     // reserved[r][c] = Who claimed this target? None or Some((claimant_r, claimant_c))
-    let mut reserved: Vec<Vec<Option<(usize, usize)>>> = vec![vec![None; width]; height];
-    let mut states = vec![vec![ResolveState::Unvisited; width]; height]; // this cell can do its move or no (or we don't know yet)
-
     for r in 0..height {
         for c in 0..width {
             if states[r][c] == ResolveState::Unvisited {
@@ -242,7 +252,15 @@ pub fn apply_movement(movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
     let mut new_cells = vec![vec![Cell::new((0, 0)); width]; height];
     for r in 0..height {
         for c in 0..width {
+            new_cells[r][c] = Cell::empty_at((r, c));
+        }
+    }
+    for r in 0..height {
+        for c in 0..width {
             let mut cell = grid.cells[r][c].clone();
+            if cell.is_empty() {
+                continue;
+            }
             
             match states[r][c] {
                 ResolveState::Resolved(true) => {
@@ -276,7 +294,7 @@ fn resolve_move(r: usize,
             // Cycle Detected (e.g. A->B->A).
             return true; 
         },
-        ResolveState::Unvisited => {},
+        _ => {},
     }
 
     // Mark as currently visiting to detect loops
@@ -300,6 +318,12 @@ fn resolve_move(r: usize,
     } else {
         // Spot is free to claim. I claim it.
         reserved[tr][tc] = Some((r, c));
+    }
+
+    // if the target cell is empty
+    if states[tr][tc] == ResolveState::Empty {
+        states[r][c] = ResolveState::Resolved(true);
+        return true;
     }
 
     // 4. Dependency Check (Phantom Collision)
