@@ -1,8 +1,8 @@
-use trait_AC::neighborhood::Neighborhood;
-use trait_AC::grid::Grid;
-use trait_AC::rules::{RuleSet, rule_diffusion, rule_average, rule_conway, rule_maximum, rule_oscillate};
-use trait_AC::movement::{apply_movement, movement_static};
-use trait_AC::utils::{print_active_traits, print_statistics, print_separator, semantic_trait_names};
+use trait_ac::neighborhood::Neighborhood;
+use trait_ac::grid::Grid;
+use trait_ac::rules::{RuleSet, rule_diffusion, rule_average, rule_conway, rule_maximum, rule_oscillate};
+use trait_ac::movement::{apply_movement, movement_static};
+use trait_ac::utils::{print_active_traits, print_statistics, print_separator, semantic_trait_names};
 
 fn main() {
     println!("=== Modular Cellular Automata Simulation ===\n");
