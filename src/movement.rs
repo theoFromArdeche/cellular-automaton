@@ -4,31 +4,50 @@ use crate::neighborhood::Neighborhood;
 use rand::Rng;
 
 /// No movement - cells stay in place
-pub fn movement_static(_cell: &Cell, _neighborhood: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+pub fn movement_static(_cell: &Cell, _nbhr_movement: &Neighborhood) -> (isize, isize) {
     (0, 0)
 }
 
-/// Random walk - move randomly within Moore neighborhood
-pub fn movement_random(_cell: &Cell, _neighborhood: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+/// Random walk - move randomly to any valid position in the neighborhood mask
+pub fn movement_random(_cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
+    // Collect all valid movement positions from the mask
+    let mut valid_moves = Vec::new();
+    
+    for (dr, row) in nbhr_movement.mask.iter().enumerate() {
+        for (dc, &is_valid) in row.iter().enumerate() {
+            if is_valid {
+                let move_dr = dr as isize - nbhr_movement.center_row as isize;
+                let move_dc = dc as isize - nbhr_movement.center_col as isize;
+                valid_moves.push((move_dr, move_dc));
+            }
+        }
+    }
+    
+    if valid_moves.is_empty() {
+        return (0, 0);
+    }
+    
     let mut rng = rand::thread_rng();
-    (rng.gen_range(-1..=1), rng.gen_range(-1..=1))
+    let idx = rng.gen_range(0..valid_moves.len());
+    valid_moves[idx]
 }
 
-/// Move toward the neighbor with the highest trait value
-pub fn movement_gradient(cell: &Cell, neighborhood: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+/// Move toward the neighbor with the highest trait value (only to valid mask positions)
+pub fn movement_gradient(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
     let current_val = cell.get_trait(0);
 
     let mut best_val = current_val;
     let mut best_move = (0, 0);
 
-    for (dr, row) in neighborhood.cells.iter().enumerate() {
+    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
         for (dc, neighbor) in row.iter().enumerate() {
-            if !neighborhood.mask[dr][dc] {
+            // Only consider positions that are in the valid movement mask
+            if !nbhr_movement.mask[dr][dc] {
                 continue;
             }
 
-            // Skip center cell
-            if dr == neighborhood.center_row && dc == neighborhood.center_col {
+            // Skip center cell (though it's still a valid "move" to stay)
+            if dr == nbhr_movement.center_row && dc == nbhr_movement.center_col {
                 continue;
             }
 
@@ -36,8 +55,8 @@ pub fn movement_gradient(cell: &Cell, neighborhood: &Neighborhood, _grid: &Grid)
             if val > best_val {
                 best_val = val;
                 best_move = (
-                    dr as isize - neighborhood.center_row as isize,
-                    dc as isize - neighborhood.center_col as isize,
+                    dr as isize - nbhr_movement.center_row as isize,
+                    dc as isize - nbhr_movement.center_col as isize,
                 );
             }
         }
@@ -46,16 +65,14 @@ pub fn movement_gradient(cell: &Cell, neighborhood: &Neighborhood, _grid: &Grid)
     best_move
 }
 
-/// Move away from crowded areas (high average neighbor density)
-pub fn movement_avoid_crowding(_cell: &Cell, neighborhood: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+/// Move away from crowded areas (only to valid mask positions)
+pub fn movement_avoid_crowding(_cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
     let mut sum = 0.0;
     let mut count = 0;
 
-    for (dr, row) in neighborhood.cells.iter().enumerate() {
+    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
         for (dc, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[dr][dc] &&
-               !(dr == neighborhood.center_row && dc == neighborhood.center_col)
-            {
+            if nbhr_movement.mask[dr][dc] && !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
                 sum += neighbor.get_trait(0);
                 count += 1;
             }
@@ -69,26 +86,42 @@ pub fn movement_avoid_crowding(_cell: &Cell, neighborhood: &Neighborhood, _grid:
     let avg_density = sum / count as f32;
 
     if avg_density > 0.7 {
+        // Collect all valid movement positions from the mask
+        let mut valid_moves = Vec::new();
+        
+        for (dr, row) in nbhr_movement.mask.iter().enumerate() {
+            for (dc, &is_valid) in row.iter().enumerate() {
+                if is_valid {
+                    let move_dr = dr as isize - nbhr_movement.center_row as isize;
+                    let move_dc = dc as isize - nbhr_movement.center_col as isize;
+                    valid_moves.push((move_dr, move_dc));
+                }
+            }
+        }
+        
+        if valid_moves.is_empty() {
+            return (0, 0);
+        }
+        
         let mut rng = rand::thread_rng();
-        (rng.gen_range(-1..=1), rng.gen_range(-1..=1))
+        let idx = rng.gen_range(0..valid_moves.len());
+        valid_moves[idx]
     } else {
         (0, 0)
     }
 }
 
-/// Trait-based exploratory movement
-pub fn movement_trait_based(cell: &Cell, neighborhood: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+/// Trait-based exploratory movement (only to valid mask positions)
+pub fn movement_trait_based(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
     let trait0 = cell.get_trait(0);
     let trait1 = cell.get_trait(1);
 
     let mut sum = 0.0;
     let mut count = 0;
 
-    for (dr, row) in neighborhood.cells.iter().enumerate() {
+    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
         for (dc, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[dr][dc] &&
-               !(dr == neighborhood.center_row && dc == neighborhood.center_col)
-            {
+            if nbhr_movement.mask[dr][dc] && !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
                 sum += neighbor.get_trait(0);
                 count += 1;
             }
@@ -101,10 +134,28 @@ pub fn movement_trait_based(cell: &Cell, neighborhood: &Neighborhood, _grid: &Gr
         sum / count as f32
     };
 
+    // Collect all valid movement positions from the mask
+    let mut valid_moves = Vec::new();
+    
+    for (dr, row) in nbhr_movement.mask.iter().enumerate() {
+        for (dc, &is_valid) in row.iter().enumerate() {
+            if is_valid {
+                let move_dr = dr as isize - nbhr_movement.center_row as isize;
+                let move_dc = dc as isize - nbhr_movement.center_col as isize;
+                valid_moves.push((move_dr, move_dc));
+            }
+        }
+    }
+    
+    if valid_moves.is_empty() {
+        return (0, 0);
+    }
+
     // Explore if isolated
     if trait0 > 0.7 && avg_neighbor_trait0 < 0.3 {
         let mut rng = rand::thread_rng();
-        return (rng.gen_range(-1..=1), rng.gen_range(-1..=1));
+        let idx = rng.gen_range(0..valid_moves.len());
+        return valid_moves[idx];
     }
 
     // Stay if stable
@@ -115,7 +166,8 @@ pub fn movement_trait_based(cell: &Cell, neighborhood: &Neighborhood, _grid: &Gr
     // Small random jitter
     let mut rng = rand::thread_rng();
     if rng.gen_bool(0.3) {
-        (rng.gen_range(-1..=1), rng.gen_range(-1..=1))
+        let idx = rng.gen_range(0..valid_moves.len());
+        valid_moves[idx]
     } else {
         (0, 0)
     }
@@ -129,9 +181,9 @@ enum ResolveState {
     Resolved(bool), // Result: true = moving, false = staying
 }
 
-pub fn apply_movement(grid: &Grid,
-                      neighborhood_base: &Neighborhood,
-                      movement_fn: fn(&Cell, &Neighborhood, &Grid) -> (isize, isize),
+pub fn apply_movement(movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
+                      nbhr_movement_base: &Neighborhood,
+                      grid: &Grid,
                       ) -> Vec<Vec<Cell>> {
 
     let height = grid.height;
@@ -144,11 +196,31 @@ pub fn apply_movement(grid: &Grid,
     for r in 0..height {
         for c in 0..width {
             let cell = &grid.cells[r][c];
-            let neighborhood = Neighborhood::new_from_base(r, c, neighborhood_base, grid);
-            let (dr, dc) = movement_fn(cell, &neighborhood, grid);
+            let nbhr_movement = Neighborhood::new_from_base(r, c, nbhr_movement_base, grid);
+            let (dr, dc) = movement_fn(cell, &nbhr_movement);
 
-            let tr = ((r as isize + dr).rem_euclid(height as isize)) as usize;
-            let tc = ((c as isize + dc).rem_euclid(width as isize)) as usize;
+            // Validate that the movement is within the allowed neighborhood mask
+            let target_dr = (nbhr_movement.center_row as isize + dr) as usize;
+            let target_dc = (nbhr_movement.center_col as isize + dc) as usize;
+            
+            // Check if the move is valid according to the mask
+            let is_valid_move = if target_dr < nbhr_movement.height && target_dc < nbhr_movement.width {
+                nbhr_movement.mask[target_dr][target_dc]
+            } else {
+                false
+            };
+
+            let (tr, tc) = if is_valid_move {
+                // Movement is valid, calculate wrapped coordinates
+                (
+                    ((r as isize + dr).rem_euclid(height as isize)) as usize,
+                    ((c as isize + dc).rem_euclid(width as isize)) as usize
+                )
+            } else {
+                // Movement is invalid, stay in place
+                (r, c)
+            };
+            
             intentions[r][c] = (tr, tc);
         }
     }
