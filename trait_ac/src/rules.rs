@@ -239,7 +239,7 @@ impl RuleSet {
     }
 
     /// Apply the rule for a specific trait
-    pub fn apply_rule(&self, trait_index: usize, cell: &Cell, neighborhood: &Neighborhood) -> f32 {
+    pub fn apply_rule(&self, cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
         (self.rules[trait_index])(cell, neighborhood, trait_index)
     }
 }

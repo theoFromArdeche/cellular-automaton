@@ -16,7 +16,7 @@ impl Cell {
         }
     }
 
-    /// Create an empty cell (used as placeholder in neighborhoods)
+    /// Create an empty cell
     pub fn empty() -> &'static Cell {
         static EMPTY_CELL: Cell = Cell {
             fingerprint: [0.0; 9],
