@@ -31,9 +31,10 @@ impl<'a> Neighborhood<'a> {
             let mut row_cells = Vec::with_capacity(width);
 
             for delta_col in 0..width {
+                let nr = row as isize + delta_row as isize - center_row as isize;
+                let nc = col as isize + delta_col as isize - center_col as isize;
+                
                 if mask[delta_row][delta_col] {
-                    let nr = row as isize + delta_row as isize - center_row as isize;
-                    let nc = col as isize + delta_col as isize - center_col as isize;
                     row_cells.push(grid.get_cell(nr, nc));
                 } else {
                     row_cells.push(Cell::empty());
@@ -79,10 +80,13 @@ impl<'a> Neighborhood<'a> {
     pub fn update_cells(&mut self, grid: &'a Grid) {
         for delta_row in 0..self.height {
             for delta_col in 0..self.width {
+                let nr = self.row as isize + delta_row as isize - self.center_row as isize;
+                let nc = self.col as isize + delta_col as isize - self.center_col as isize;
+                
                 if self.mask[delta_row][delta_col] {
-                    let nr = self.row as isize + delta_row as isize - self.center_row as isize;
-                    let nc = self.col as isize + delta_col as isize - self.center_col as isize;
                     self.cells[delta_row][delta_col] = grid.get_cell(nr, nc);
+                } else {
+                    self.cells[delta_row][delta_col] = Cell::empty()
                 }
             }
         }

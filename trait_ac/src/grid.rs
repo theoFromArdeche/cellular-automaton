@@ -11,11 +11,32 @@ pub struct Grid {
 impl Grid {
     /// Create a new grid with random cells
     pub fn new(width: usize, height: usize) -> Self {
+        Self::new_with_density(width, height, 1.0)
+    }
+
+    /// Create a new grid with a specified density of filled cells
+    /// 
+    /// # Arguments
+    /// * `width` - Width of the grid
+    /// * `height` - Height of the grid
+    /// * `fill_percentage` - Percentage of cells to fill (0.0 to 1.0)
+    ///   - 1.0 = 100% filled (all cells have random values)
+    ///   - 0.5 = 50% filled, 50% empty
+    ///   - 0.0 = 0% filled (all cells are empty)
+    pub fn new_with_density(width: usize, height: usize, fill_percentage: f32) -> Self {
+        let fill_percentage = fill_percentage.clamp(0.0, 1.0);
+        let mut rng = rand::thread_rng();
         let mut cells = Vec::with_capacity(height);
+
         for row in 0..height {
             let mut row_cells = Vec::with_capacity(width);
             for col in 0..width {
-                row_cells.push(Cell::random((row, col)));
+                // Randomly decide if this cell should be filled based on percentage
+                if rng.gen_range(0.0..=1.0) < fill_percentage {
+                    row_cells.push(Cell::random((row, col)));
+                } else {
+                    row_cells.push(Cell::empty_at((row, col)));
+                }
             }
             cells.push(row_cells);
         }
@@ -26,6 +47,7 @@ impl Grid {
             cells,
         }
     }
+
 
     /// Get a position (row, col), wrapping around (toroidal grid)
     pub fn get_position(&self, row: isize, col: isize) -> (usize, usize) {
@@ -61,7 +83,6 @@ impl Grid {
     /// Randomize grid
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
-
         for row in &mut self.cells {
             for cell in row {
                 for i in 0..cell.fingerprint.len() {
@@ -71,6 +92,23 @@ impl Grid {
         }
     }
 
+    /// Count the number of filled (non-empty) cells
+    pub fn count_filled_cells(&self) -> usize {
+        self.cells
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|cell| !cell.is_empty())
+            .count()
+    }
+
+    /// Get the actual fill percentage of the grid
+    pub fn get_fill_percentage(&self) -> f32 {
+        let total_cells = self.width * self.height;
+        if total_cells == 0 {
+            return 0.0;
+        }
+        self.count_filled_cells() as f32 / total_cells as f32
+    }
 }
 
 #[cfg(test)]
@@ -91,5 +129,26 @@ mod tests {
         let grid = Grid::new(5, 5);
         let cell = grid.get_cell(-1, -1);
         assert_eq!(cell.position, (4, 4));
+    }
+
+    #[test]
+    fn test_grid_with_density() {
+        let grid = Grid::new_with_density(100, 100, 0.5);
+        let fill_percentage = grid.get_fill_percentage();
+        assert!(fill_percentage >= 0.45 && fill_percentage <= 0.55);
+    }
+
+    #[test]
+    fn test_fully_empty_grid() {
+        let grid = Grid::new_with_density(5, 5, 0.0);
+        assert_eq!(grid.count_filled_cells(), 0);
+        assert_eq!(grid.get_fill_percentage(), 0.0);
+    }
+
+    #[test]
+    fn test_fully_filled_grid() {
+        let grid = Grid::new_with_density(5, 5, 1.0);
+        assert_eq!(grid.count_filled_cells(), 25);
+        assert_eq!(grid.get_fill_percentage(), 1.0);
     }
 }

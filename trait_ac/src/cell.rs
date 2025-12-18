@@ -5,6 +5,7 @@ use rand::Rng;
 pub struct Cell {
     pub fingerprint: [f32; 9],
     pub position: (usize, usize),
+    pub is_empty: bool,
 }
 
 impl Cell {
@@ -13,16 +14,27 @@ impl Cell {
         Self {
             fingerprint: [0.0; 9],
             position,
+            is_empty: false,
         }
     }
 
-    /// Create an empty cell
+    /// Create a static empty cell
     pub fn empty() -> &'static Cell {
         static EMPTY_CELL: Cell = Cell {
             fingerprint: [0.0; 9],
             position: (0, 0),
+            is_empty: true,
         };
         &EMPTY_CELL
+    }
+
+    /// Create an empty cell at a specific position
+    pub fn empty_at(position: (usize, usize)) -> Self {
+        Self {
+            fingerprint: [0.0; 9],
+            position,
+            is_empty: true,
+        }
     }
 
     /// Create a cell with random trait values
@@ -35,7 +47,28 @@ impl Cell {
         Self {
             fingerprint,
             position,
+            is_empty: false,
         }
+    }
+
+    /// Check if the cell is empty
+    pub fn is_empty(&self) -> bool {
+        self.is_empty
+    }
+
+    /// Fill an empty cell with random values
+    pub fn fill_random(&mut self) {
+        let mut rng = rand::thread_rng();
+        for trait_val in self.fingerprint.iter_mut() {
+            *trait_val = rng.gen_range(0.0..=1.0);
+        }
+        self.is_empty = false;
+    }
+
+    /// Make a cell empty (clear all traits)
+    pub fn make_empty(&mut self) {
+        self.fingerprint = [0.0; 9];
+        self.is_empty = true;
     }
 
     /// Get a specific trait value
@@ -73,5 +106,31 @@ mod tests {
         assert_eq!(cell.get_trait(0), 1.0);
         cell.set_trait(0, -0.5);
         assert_eq!(cell.get_trait(0), 0.0);
+    }
+
+    #[test]
+    fn test_empty_cell() {
+        let cell = Cell::empty_at((1, 2));
+        assert!(cell.is_empty());
+        assert_eq!(cell.position, (1, 2));
+    }
+
+    #[test]
+    fn test_fill_and_empty() {
+        let mut cell = Cell::empty_at((0, 0));
+        assert!(cell.is_empty());
+        
+        cell.fill_random();
+        assert!(!cell.is_empty());
+        
+        cell.make_empty();
+        assert!(cell.is_empty());
+        assert_eq!(cell.fingerprint, [0.0; 9]);
+    }
+
+    #[test]
+    fn test_random_cell_not_empty() {
+        let cell = Cell::random((0, 0));
+        assert!(!cell.is_empty());
     }
 }

@@ -109,6 +109,7 @@ struct CAApp {
     grid: Grid,
     grid_width: usize, // usefull if the Grid object is reset
     grid_height: usize,
+    grid_density: f32,
     
     // Simulation state
     timestep: usize,
@@ -126,6 +127,7 @@ struct CAApp {
     cell_size: f32,
     show_values: bool,
     color_scheme: ColorScheme,
+    base_color_no_actor: f32,
     
     // Trait names
     trait_names: [String; 9],
@@ -153,8 +155,13 @@ impl ColorScheme {
         }
     }
     
-    fn map_value(&self, value: f32) -> Color32 {
-        let v = value.clamp(0.0, 1.0);
+    fn map_value(&self, value: f32, is_empty: bool, base_color_no_actor: f32) -> Color32 {
+        let v;
+        if !is_empty {
+            v = (base_color_no_actor + value*(1.0-base_color_no_actor)).clamp(0.0, 1.0);
+        } else {
+            v = 0.0;
+        }
         match self {
             Self::Viridis => {
                 let r = (68.0 + v * (253.0 - 68.0)) as u8;
@@ -189,7 +196,8 @@ impl Default for CAApp {
     fn default() -> Self {
         let grid_width = 20;
         let grid_height = 20;
-        let grid = Grid::new(grid_width, grid_height);
+        let grid_density = 0.33;
+        let grid = Grid::new_with_density(grid_width, grid_height, grid_density);
         
         let active_mask = vec![
             vec![true, true, false],
@@ -213,6 +221,7 @@ impl Default for CAApp {
             grid,
             grid_width,
             grid_height,
+            grid_density,
             timestep: 0,
             is_playing: false,
             steps_per_second: 2.0,
@@ -224,6 +233,7 @@ impl Default for CAApp {
             cell_size: 30.0,
             show_values: false,
             color_scheme: ColorScheme::Viridis,
+            base_color_no_actor: 0.1,
             trait_names: [
                 "Energy".to_string(),
                 "Confidence".to_string(),
@@ -262,8 +272,13 @@ impl CAApp {
             let mut new_row = Vec::new();
             for col in 0..self.grid.width {
                 let cell = &self.grid.cells[row][col];
-                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &self.grid);
                 let mut new_cell = cell.clone();
+                if new_cell.is_empty() {
+                    new_row.push(new_cell);
+                    continue;
+                }
+
+                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &self.grid);
                 
                 for mask_row in 0..3 {
                     for mask_col in 0..3 {
@@ -309,7 +324,7 @@ impl CAApp {
     }
     
     fn reset_grid(&mut self) {
-        self.grid = Grid::new(self.grid_width, self.grid_height);
+        self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density);
         self.timestep = 0;
         self.is_playing = false;
     }
@@ -372,6 +387,8 @@ impl eframe::App for CAApp {
                 .text("Width")).changed();
             changed |= ui.add(egui::Slider::new(&mut self.grid_height, 5..=250)
                 .text("Height")).changed();
+            changed |= ui.add(egui::Slider::new(&mut self.grid_density, 0.01..=1.0)
+                .text("Density")).changed();
             if changed {
                 self.reset_grid();
             }
@@ -460,7 +477,7 @@ impl eframe::App for CAApp {
                                 }
                             });
                     });
-
+                    ui.add(egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color"));
                     ui.add(egui::Slider::new(&mut self.cell_size, 5.0..=60.0).text("Cell Size"));
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
@@ -520,8 +537,9 @@ impl eframe::App for CAApp {
                             Pos2::new(x, y),
                             Vec2::new(self.cell_size, self.cell_size),
                         );
-                        
-                        let color = self.color_scheme.map_value(value);
+
+                        let is_empty = self.grid.cells[row][col].is_empty();
+                        let color = self.color_scheme.map_value(value, is_empty, self.base_color_no_actor);
                         painter.rect_filled(cell_rect, 0.0, color);
                         painter.rect_stroke(cell_rect, 0.0, Stroke::new(0.5, Color32::GRAY));
                         
