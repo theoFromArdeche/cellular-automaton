@@ -12,17 +12,23 @@ fn main() {
     let grid_width = 10;
     let timesteps = 5;
 
-    // Define which traits are active (3x3 boolean grid)
+    // Define which traits are active
     let active_mask = vec![
         vec![true,  true,  false],  // Traits 0, 1 active
         vec![false, true,  false],  // Trait 4 active
         vec![true,  false, false],  // Trait 6 active
     ];
 
-    // Define neighborhood (3x3 boolean mask)
     // True = this neighbor position affects the cell
     let neighborhood_mask = vec![
-        vec![true,  true,  true],   // Von Neumann + diagonals
+        vec![true,  true,  true],
+        vec![true,  true,  true],
+        vec![true,  true,  true],
+    ];
+
+    // True = in the movement process the cell can have information about this position and possibly move to it
+    let nbhr_movement_mask = vec![
+        vec![true,  true,  true],
         vec![true,  true,  true],
         vec![true,  true,  true],
     ];
@@ -31,6 +37,11 @@ fn main() {
     let neighborhood_width = neighborhood_mask[0].len();
     let neighborhood_center_row = (neighborhood_height-1)/2;
     let neighborhood_center_col = (neighborhood_width-1)/2;
+
+    let nbhr_movement_height = nbhr_movement_mask.len();
+    let nbhr_movement_width = nbhr_movement_mask[0].len();
+    let nbhr_movement_center_row = (nbhr_movement_height-1)/2;
+    let nbhr_movement_center_col = (nbhr_movement_width-1)/2;
 
     // Initialize grid
     let mut grid = Grid::new(grid_width, grid_height);
@@ -44,6 +55,16 @@ fn main() {
         neighborhood_center_col,
         0, 0,
         &neighborhood_mask,
+        &dummy_grid,
+    );
+
+    let nbhr_movement_base = Neighborhood::new(
+        nbhr_movement_width,
+        nbhr_movement_height,
+        nbhr_movement_center_row,
+        nbhr_movement_center_col,
+        0, 0,
+        &nbhr_movement_mask,
         &dummy_grid,
     );
 
@@ -115,7 +136,7 @@ fn main() {
         grid.update_cells(new_cells);
 
         // Step 2: Apply movement
-        let moved_cells = apply_movement(&grid, &neighborhood_base, movement_fn);
+        let moved_cells = apply_movement(movement_fn, &nbhr_movement_base, &grid);
         grid.update_cells(moved_cells);
 
         // Print results
