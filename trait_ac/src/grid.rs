@@ -48,8 +48,8 @@ impl Grid {
         }
     }
 
-
     /// Get a position (row, col), wrapping around (toroidal grid)
+    #[inline(always)]
     pub fn get_position(&self, row: isize, col: isize) -> (usize, usize) {
         let wrapped_row = row.rem_euclid(self.height as isize) as usize;
         let wrapped_col = col.rem_euclid(self.width as isize) as usize;
@@ -57,9 +57,12 @@ impl Grid {
     }
 
     /// Get a cell at position (row, col), wrapping around (toroidal grid)
+    #[inline(always)]
     pub fn get_cell(&self, row: isize, col: isize) -> &Cell {
         let (wrapped_row, wrapped_col) = self.get_position(row, col);
-        &self.cells[wrapped_row][wrapped_col]
+        unsafe {
+            self.cells.get_unchecked(wrapped_row).get_unchecked(wrapped_col)
+        }
     }
 
     /// Get all cells in the grid as a flat vector
@@ -68,8 +71,15 @@ impl Grid {
     }
 
     /// Update the grid with new cell states
+    #[inline(always)]
     pub fn update_cells(&mut self, new_cells: Vec<Vec<Cell>>) {
         self.cells = new_cells;
+    }
+
+    /// Fast update that swaps the internal vector (avoids reallocation)
+    #[inline(always)]
+    pub fn update_cells_fast(&mut self, new_cells: &mut Vec<Vec<Cell>>) {
+        std::mem::swap(&mut self.cells, new_cells);
     }
 
     /// Get trait values for all cells in row-major order

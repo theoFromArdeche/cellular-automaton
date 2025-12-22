@@ -8,6 +8,7 @@ trait_ac = { path = "../trait_ac" }  # Adjust path to your library
 eframe = "0.30"
 egui = "0.30"
 egui_plot = "0.30"
+rayon = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -16,4 +17,6 @@ web-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 
 [profile.release]
-opt-level = 2
+opt-level = 3
+lto = true
+codegen-units = 1

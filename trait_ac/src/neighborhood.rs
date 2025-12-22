@@ -15,35 +15,34 @@ pub struct Neighborhood<'a> {
 
 impl<'a> Neighborhood<'a> {
     /// Create a new neighborhood view for a specific grid position
-    pub fn new(width: usize,
-               height: usize,
-               center_row: usize,
-               center_col: usize,
-               row: usize,
-               col: usize,
-               mask: &'a [Vec<bool>],
-               grid: &'a Grid,
-            ) -> Self {
-
+    #[inline]
+    pub fn new(
+        width: usize,
+        height: usize,
+        center_row: usize,
+        center_col: usize,
+        row: usize,
+        col: usize,
+        mask: &'a [Vec<bool>],
+        grid: &'a Grid,
+    ) -> Self {
         let mut cells = Vec::with_capacity(height);
-
+        
         for delta_row in 0..height {
             let mut row_cells = Vec::with_capacity(width);
-
             for delta_col in 0..width {
                 let nr = row as isize + delta_row as isize - center_row as isize;
                 let nc = col as isize + delta_col as isize - center_col as isize;
                 
-                if mask[delta_row][delta_col] {
+                if unsafe { *mask.get_unchecked(delta_row).get_unchecked(delta_col) } {
                     row_cells.push(grid.get_cell(nr, nc));
                 } else {
                     row_cells.push(Cell::empty());
                 }
             }
-
             cells.push(row_cells);
         }
-
+        
         Self {
             width,
             height,
@@ -57,13 +56,13 @@ impl<'a> Neighborhood<'a> {
     }
 
     /// Create a new neighborhood using an existing neighborhood as a template
-    #[inline]
-    pub fn new_from_base(row: usize,
-                         col: usize,
-                         base: &Neighborhood<'a>,
-                         grid: &'a Grid,
-                        ) -> Self {
-
+    #[inline(always)]
+    pub fn new_from_base(
+        row: usize,
+        col: usize,
+        base: &Neighborhood<'a>,
+        grid: &'a Grid,
+    ) -> Self {
         Self::new(
             base.width,
             base.height,
@@ -111,9 +110,7 @@ mod tests {
             vec![true, true, true],
             vec![true, true, true],
         ];
-
         let neighborhood = Neighborhood::new(3, 3, 1, 1, 2, 2, &mask, &grid);
-
         assert_eq!(neighborhood.width, 3);
         assert_eq!(neighborhood.height, 3);
         assert_eq!(neighborhood.center_row, 1);

@@ -1,62 +1,73 @@
 use crate::cell::Cell;
 use crate::grid::Grid;
 use crate::neighborhood::Neighborhood;
-use rand::Rng;
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+use rand::prelude::*;
 
 /// No movement - cells stay in place
-pub fn movement_static(_cell: &Cell, _nbhr_movement: &Neighborhood) -> (isize, isize) {
+#[inline(always)]
+pub fn movement_static(_cell: &Cell, _neighborhood_mvt: &Neighborhood) -> (isize, isize) {
     (0, 0)
 }
 
 /// Random walk - move randomly to any valid position in the neighborhood mask
-pub fn movement_random(_cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
-    // Collect all valid movement positions from the mask
-    let mut valid_moves = Vec::new();
+pub fn movement_random(_cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
+    // Pre-computed valid moves would be better, but this is still reasonable
+    let mut valid_moves = [(0isize, 0isize); 9]; // Max 9 positions in 3x3
+    let mut count = 0;
     
-    for (dr, row) in nbhr_movement.mask.iter().enumerate() {
-        for (dc, &is_valid) in row.iter().enumerate() {
-            if is_valid {
-                let move_dr = dr as isize - nbhr_movement.center_row as isize;
-                let move_dc = dc as isize - nbhr_movement.center_col as isize;
-                valid_moves.push((move_dr, move_dc));
+    let center_row = neighborhood_mvt.center_row;
+    let center_col = neighborhood_mvt.center_col;
+    
+    for dr in 0..neighborhood_mvt.height {
+        for dc in 0..neighborhood_mvt.width {
+            if unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } {
+                valid_moves[count] = (
+                    dr as isize - center_row as isize,
+                    dc as isize - center_col as isize
+                );
+                count += 1;
             }
         }
     }
     
-    if valid_moves.is_empty() {
+    if count == 0 {
         return (0, 0);
     }
     
     let mut rng = rand::thread_rng();
-    let idx = rng.gen_range(0..valid_moves.len());
-    valid_moves[idx]
+    let idx = rng.gen_range(0..count);
+    unsafe { *valid_moves.get_unchecked(idx) }
 }
 
-/// Move toward the neighbor with the highest trait value (only to valid mask positions)
-pub fn movement_gradient(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
+/// Move toward the neighbor with the highest trait value (gradient ascent)
+pub fn movement_gradient(cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
     let current_val = cell.get_trait(0);
-
     let mut best_val = current_val;
     let mut best_move = (0, 0);
 
-    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
-        for (dc, neighbor) in row.iter().enumerate() {
-            // Only consider positions that are in the valid movement mask
-            if !nbhr_movement.mask[dr][dc] {
+    let center_row = neighborhood_mvt.center_row;
+    let center_col = neighborhood_mvt.center_col;
+
+    for dr in 0..neighborhood_mvt.height {
+        for dc in 0..neighborhood_mvt.width {
+            if !unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } {
                 continue;
             }
 
-            // Skip center cell (though it's still a valid "move" to stay)
-            if dr == nbhr_movement.center_row && dc == nbhr_movement.center_col {
+            if dr == center_row && dc == center_col {
                 continue;
             }
 
+            let neighbor = unsafe { neighborhood_mvt.cells.get_unchecked(dr).get_unchecked(dc) };
             let val = neighbor.get_trait(0);
+            
             if val > best_val {
                 best_val = val;
                 best_move = (
-                    dr as isize - nbhr_movement.center_row as isize,
-                    dc as isize - nbhr_movement.center_col as isize,
+                    dr as isize - center_row as isize,
+                    dc as isize - center_col as isize,
                 );
             }
         }
@@ -65,18 +76,24 @@ pub fn movement_gradient(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, i
     best_move
 }
 
-/// Move away from crowded areas (only to valid mask positions)
-pub fn movement_avoid_crowding(_cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
+/// Move away from high-density areas (gradient descent on density)
+pub fn movement_avoid_crowding(_cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
     let mut sum = 0.0;
     let mut count = 0;
 
-    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
-        for (dc, neighbor) in row.iter().enumerate() {
-            if nbhr_movement.mask[dr][dc] &&
-               !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) {
+    let center_row = neighborhood_mvt.center_row;
+    let center_col = neighborhood_mvt.center_col;
 
-                sum += neighbor.get_trait(0);
-                count += 1;
+    for dr in 0..neighborhood_mvt.height {
+        for dc in 0..neighborhood_mvt.width {
+            if unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } &&
+               !(dr == center_row && dc == center_col) {
+                
+                let neighbor = unsafe { neighborhood_mvt.cells.get_unchecked(dr).get_unchecked(dc) };
+                if !neighbor.is_empty() {
+                    sum += neighbor.get_trait(0);
+                    count += 1;
+                }
             }
         }
     }
@@ -88,264 +105,394 @@ pub fn movement_avoid_crowding(_cell: &Cell, nbhr_movement: &Neighborhood) -> (i
     let avg_density = sum / count as f32;
 
     if avg_density > 0.7 {
-        // Collect all valid movement positions from the mask
-        let mut valid_moves = Vec::new();
+        let mut valid_moves = [(0isize, 0isize); 9];
+        let mut move_count = 0;
         
-        for (dr, row) in nbhr_movement.mask.iter().enumerate() {
-            for (dc, &is_valid) in row.iter().enumerate() {
-                if is_valid {
-                    let move_dr = dr as isize - nbhr_movement.center_row as isize;
-                    let move_dc = dc as isize - nbhr_movement.center_col as isize;
-                    valid_moves.push((move_dr, move_dc));
+        for dr in 0..neighborhood_mvt.height {
+            for dc in 0..neighborhood_mvt.width {
+                if unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } {
+                    valid_moves[move_count] = (
+                        dr as isize - center_row as isize,
+                        dc as isize - center_col as isize,
+                    );
+                    move_count += 1;
                 }
             }
         }
         
-        if valid_moves.is_empty() {
+        if move_count == 0 {
             return (0, 0);
         }
         
         let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..valid_moves.len());
-        valid_moves[idx]
+        let idx = rng.gen_range(0..move_count);
+        unsafe { *valid_moves.get_unchecked(idx) }
     } else {
         (0, 0)
     }
 }
 
-/// Trait-based exploratory movement (only to valid mask positions)
-pub fn movement_trait_based(cell: &Cell, nbhr_movement: &Neighborhood) -> (isize, isize) {
-    let trait0 = cell.get_trait(0);
-    let trait1 = cell.get_trait(1);
+/// Chemotaxis - move toward areas with specific trait combinations
+pub fn movement_chemotaxis(cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
+    let target_trait = 2; // Looking for cooperation trait
+    let current_val = cell.get_trait(target_trait);
+    
+    let mut best_val = current_val;
+    let mut best_move = (0, 0);
 
-    let mut sum = 0.0;
-    let mut count = 0;
+    let center_row = neighborhood_mvt.center_row;
+    let center_col = neighborhood_mvt.center_col;
 
-    for (dr, row) in nbhr_movement.cells.iter().enumerate() {
-        for (dc, neighbor) in row.iter().enumerate() {
-            if nbhr_movement.mask[dr][dc] &&
-               !(dr == nbhr_movement.center_row && dc == nbhr_movement.center_col) &&
-               !nbhr_movement.cells[dr][dc].is_empty() {
+    for dr in 0..neighborhood_mvt.height {
+        for dc in 0..neighborhood_mvt.width {
+            if !unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } {
+                continue;
+            }
 
-                sum += neighbor.get_trait(0);
-                count += 1;
+            if dr == center_row && dc == center_col {
+                continue;
+            }
+
+            let neighbor = unsafe { neighborhood_mvt.cells.get_unchecked(dr).get_unchecked(dc) };
+            if neighbor.is_empty() {
+                continue;
+            }
+            
+            let val = neighbor.get_trait(target_trait);
+            if val > best_val {
+                best_val = val;
+                best_move = (
+                    dr as isize - center_row as isize,
+                    dc as isize - center_col as isize,
+                );
             }
         }
     }
 
-    let avg_neighbor_trait0 = if count == 0 {
-        0.0
-    } else {
-        sum / count as f32
-    };
+    best_move
+}
 
-    // Collect all valid movement positions from the mask
-    let mut valid_moves = Vec::new();
-    
-    for (dr, row) in nbhr_movement.mask.iter().enumerate() {
-        for (dc, &is_valid) in row.iter().enumerate() {
-            if is_valid {
-                let move_dr = dr as isize - nbhr_movement.center_row as isize;
-                let move_dc = dc as isize - nbhr_movement.center_col as isize;
-                valid_moves.push((move_dr, move_dc));
-            }
-        }
-    }
-    
-    if valid_moves.is_empty() {
-        return (0, 0);
-    }
-
-    // Explore if isolated
-    if trait0 > 0.7 && avg_neighbor_trait0 < 0.3 {
-        let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..valid_moves.len());
-        return valid_moves[idx];
-    }
-
-    // Stay if stable
-    if trait1 > 0.8 {
-        return (0, 0);
-    }
-
-    // Small random jitter
+/// Levy flight - occasional long-distance jumps with mostly local movement
+pub fn movement_levy_flight(_cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
     let mut rng = rand::thread_rng();
-    if rng.gen_bool(0.3) {
-        let idx = rng.gen_range(0..valid_moves.len());
-        valid_moves[idx]
+    
+    // 90% local movement, 10% long jump
+    if rng.gen_bool(0.9) {
+        // Local movement
+        movement_random(_cell, neighborhood_mvt)
+    } else {
+        // Long jump - use full neighborhood extent
+        let mut valid_moves = [(0isize, 0isize); 9];
+        let mut count = 0;
+        
+        let center_row = neighborhood_mvt.center_row;
+        let center_col = neighborhood_mvt.center_col;
+        
+        for dr in 0..neighborhood_mvt.height {
+            for dc in 0..neighborhood_mvt.width {
+                if unsafe { *neighborhood_mvt.mask.get_unchecked(dr).get_unchecked(dc) } {
+                    valid_moves[count] = (
+                        dr as isize - center_row as isize,
+                        dc as isize - center_col as isize,
+                    );
+                    count += 1;
+                }
+            }
+        }
+        
+        if count == 0 {
+            return (0, 0);
+        }
+        
+        let idx = rng.gen_range(0..count);
+        unsafe { *valid_moves.get_unchecked(idx) }
+    }
+}
+
+/// Multi-trait based movement - considers multiple traits for decision
+pub fn movement_multi_trait(cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
+    let energy = cell.get_trait(0);
+    let mobility = cell.get_trait(5);
+    let aggression = cell.get_trait(3);
+    
+    // High mobility = more likely to move
+    let mut rng = rand::thread_rng();
+    if mobility < 0.3 {
+        return (0, 0); // Low mobility = stay put
+    }
+    
+    // High energy + high aggression = seek highest value neighbor
+    if energy > 0.6 && aggression > 0.6 {
+        return movement_gradient(cell, neighborhood_mvt);
+    }
+    
+    // Low energy = avoid crowding
+    if energy < 0.3 {
+        return movement_avoid_crowding(cell, neighborhood_mvt);
+    }
+    
+    // Default: weighted random based on mobility
+    if rng.gen_bool(mobility as f64) {
+        movement_random(cell, neighborhood_mvt)
     } else {
         (0, 0)
     }
 }
+
+/// Directional persistence - tend to keep moving in the same direction
+pub fn movement_persistent(cell: &Cell, neighborhood_mvt: &Neighborhood) -> (isize, isize) {
+    // Use traits to encode "momentum" or direction memory
+    let momentum_x = cell.get_trait(7) * 2.0 - 1.0; // Convert [0,1] to [-1,1]
+    let momentum_y = cell.get_trait(8) * 2.0 - 1.0;
+    
+    let mut rng = rand::thread_rng();
+    
+    // 70% chance to continue in similar direction
+    if rng.gen_bool(0.7) && (momentum_x.abs() > 0.1 || momentum_y.abs() > 0.1) {
+        let dr = momentum_y.round() as isize;
+        let dc = momentum_x.round() as isize;
+        
+        // Validate against mask
+        let target_dr = (neighborhood_mvt.center_row as isize + dr) as usize;
+        let target_dc = (neighborhood_mvt.center_col as isize + dc) as usize;
+        
+        if target_dr < neighborhood_mvt.height && target_dc < neighborhood_mvt.width {
+            if unsafe { *neighborhood_mvt.mask.get_unchecked(target_dr).get_unchecked(target_dc) } {
+                return (dr, dc);
+            }
+        }
+    }
+    
+    // Otherwise random movement
+    movement_random(cell, neighborhood_mvt)
+}
+
 
 
 #[derive(Clone, Copy, PartialEq)]
 enum ResolveState {
     Unvisited,
-    Visiting,      // Currently processing (detects cycles)
+    Visiting,
     Empty,
-    Resolved(bool), // Result: true = moving, false = staying
+    Resolved(bool),
 }
 
-pub fn apply_movement(movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
-                      nbhr_movement_base: &Neighborhood,
-                      grid: &Grid,
-                      ) -> Vec<Vec<Cell>> {
 
+pub fn apply_movement(
+    movement_fn: fn(&Cell, &Neighborhood) -> (isize, isize),
+    neighborhood_mvt_base: &Neighborhood,
+    grid: &Grid,
+) -> Vec<Vec<Cell>> {
     let height = grid.height;
     let width = grid.width;
 
-    let mut reserved: Vec<Vec<Option<(usize, usize)>>> = vec![vec![None; width]; height];
-    let mut states = vec![vec![ResolveState::Unvisited; width]; height]; // this cell can do its move or no (or we don't know yet)
+    // A flat buffer to store "Bids" for target cells. 
+    // Format: High 32 bits = Random Priority, Low 32 bits = Source Cell Index.
+    // This allows us to use atomic_max to pick a random winner in parallel.
+    let mut claims = Vec::with_capacity(width * height);
+    claims.resize_with(width * height, || AtomicU64::new(0));
 
-    // 1. Calculate Intentions
-    // intentions[r][c] = (target_row, target_col)
-    let mut intentions = vec![vec![(0, 0); width]; height];
+    // --- Phase 1: Parallel Intention Calculation & Bidding ---
+    let mut intentions: Vec<Vec<(usize, usize)>> = grid.cells
+        .par_iter()
+        .enumerate()
+        .map(|(r, row)| {
+            let mut row_intentions = Vec::with_capacity(width);
+            let mut rng = rand::thread_rng(); // Thread-local RNG for performance
+
+            for (c, cell) in row.iter().enumerate() {
+                if cell.is_empty() {
+                    row_intentions.push((r, c));
+                    continue;
+                }
+
+                // 1. Calculate Move
+                let neighborhood_mvt = Neighborhood::new_from_base(r, c, neighborhood_mvt_base, grid);
+                let (dr, dc) = movement_fn(cell, &neighborhood_mvt);
+
+                let target_dr = (neighborhood_mvt.center_row as isize + dr) as usize;
+                let target_dc = (neighborhood_mvt.center_col as isize + dc) as usize;
+                
+                let is_valid_move = if target_dr < neighborhood_mvt.height && target_dc < neighborhood_mvt.width {
+                    unsafe { *neighborhood_mvt.mask.get_unchecked(target_dr).get_unchecked(target_dc) }
+                } else {
+                    false
+                };
+
+                let (tr, tc) = if is_valid_move {
+                    (
+                        ((r as isize + dr).rem_euclid(height as isize)) as usize,
+                        ((c as isize + dc).rem_euclid(width as isize)) as usize
+                    )
+                } else {
+                    (r, c)
+                };
+
+                // 2. Bid for the target (Random Collision Resolution)
+                if (tr, tc) != (r, c) {
+                    let target_flat_idx = tr * width + tc;
+                    let source_flat_idx = r * width + c;
+                    
+                    // Generate random priority (using high bits ensures randomness)
+                    let priority: u32 = rng.next_u32(); 
+                    // Pack: Priority (top 32) | Source Index (bottom 32)
+                    let bid = ((priority as u64) << 32) | (source_flat_idx as u64);
+
+                    // Atomic Max: Attempt to write our bid. If a higher bid exists, we lose.
+                    // Relaxed ordering is sufficient as we synchronize via the next phase.
+                    unsafe {
+                        claims.get_unchecked(target_flat_idx).fetch_max(bid, Ordering::Relaxed);
+                    }
+                }
+
+                row_intentions.push((tr, tc));
+            }
+            row_intentions
+        })
+        .collect();
+
+    // --- Phase 2: Parallel Pruning ---
+    // Check if we won the bid. If not, reset intention to (r,c).
+    intentions.par_iter_mut().enumerate().for_each(|(r, row)| {
+        for (c, target) in row.iter_mut().enumerate() {
+            let (tr, tc) = *target;
+            
+            // If we intended to move...
+            if (tr, tc) != (r, c) {
+                let target_flat_idx = tr * width + tc;
+                let source_flat_idx = r * width + c;
+                
+                let winning_bid = unsafe { claims.get_unchecked(target_flat_idx).load(Ordering::Relaxed) };
+                let winner_idx = (winning_bid & 0xFFFFFFFF) as usize;
+
+                // If the winner is not us, we must cancel our move.
+                if winner_idx != source_flat_idx {
+                    *target = (r, c);
+                }
+            }
+        }
+    });
+
+    // --- Phase 3: Resolve Logic (Sequential DFS) ---
+    // The graph is now simplified (max 1 incoming per cell), but we still need DFS
+    // to handle "vacancy chains" (A->B is only valid if B moves away).
+    let mut reserved: Vec<Vec<Option<(usize, usize)>>> = vec![vec![None; width]; height];
+    let mut states = vec![vec![ResolveState::Unvisited; width]; height];
+
     for r in 0..height {
         for c in 0..width {
-            let cell = &grid.cells[r][c];
+            let cell = unsafe { grid.cells.get_unchecked(r).get_unchecked(c) };
             if cell.is_empty() {
-                states[r][c] = ResolveState::Empty;
-                continue;
+                unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Empty; }
             }
-
-            let nbhr_movement = Neighborhood::new_from_base(r, c, nbhr_movement_base, grid);
-            let (dr, dc) = movement_fn(cell, &nbhr_movement);
-
-            // Validate that the movement is within the allowed neighborhood mask
-            let target_dr = (nbhr_movement.center_row as isize + dr) as usize;
-            let target_dc = (nbhr_movement.center_col as isize + dc) as usize;
-            
-            // Check if the move is valid according to the mask
-            let is_valid_move = if target_dr < nbhr_movement.height && target_dc < nbhr_movement.width {
-                nbhr_movement.mask[target_dr][target_dc]
-            } else {
-                false
-            };
-
-            let (tr, tc) = if is_valid_move {
-                // Movement is valid, calculate wrapped coordinates
-                (
-                    ((r as isize + dr).rem_euclid(height as isize)) as usize,
-                    ((c as isize + dc).rem_euclid(width as isize)) as usize
-                )
-            } else {
-                // Movement is invalid, stay in place
-                (r, c)
-            };
-            
-            intentions[r][c] = (tr, tc);
         }
     }
 
-    // 2. Resolve Movement Logic
-    // reserved[r][c] = Who claimed this target? None or Some((claimant_r, claimant_c))
     for r in 0..height {
         for c in 0..width {
-            if states[r][c] == ResolveState::Unvisited {
+            if unsafe { *states.get_unchecked(r).get_unchecked(c) } == ResolveState::Unvisited {
                 resolve_move(r, c, &intentions, &mut reserved, &mut states);
             }
         }
     }
 
-    // 3. Construct and fill the new Grid
-    let mut new_cells = vec![vec![Cell::new((0, 0)); width]; height];
-    for r in 0..height {
+    // --- Phase 4: Construct New Grid (Parallel) ---
+    // We can construct the rows in parallel.
+    let new_cells: Vec<Vec<Cell>> = (0..height).into_par_iter().map(|r| {
+        let mut row_cells = Vec::with_capacity(width);
         for c in 0..width {
-            new_cells[r][c] = Cell::empty_at((r, c));
-        }
-    }
-    for r in 0..height {
-        for c in 0..width {
-            let mut cell = grid.cells[r][c].clone();
+            let cell = unsafe { grid.cells.get_unchecked(r).get_unchecked(c) };
+
             if cell.is_empty() {
+                // If cell is empty, check if someone moved into us (reserved holds the source)
+                match unsafe { *reserved.get_unchecked(r).get_unchecked(c) } {
+                    Some((sr, sc)) => {
+                        let source_cell = unsafe { grid.cells.get_unchecked(sr).get_unchecked(sc) };
+                        let mut moved_cell = source_cell.clone();
+                        moved_cell.position = (r, c);
+                        row_cells.push(moved_cell);
+                    },
+                    None => row_cells.push(Cell::empty_at((r, c))),
+                }
                 continue;
             }
-            
-            match states[r][c] {
+
+            let state = unsafe { *states.get_unchecked(r).get_unchecked(c) };
+            match state {
                 ResolveState::Resolved(true) => {
-                    // This cell is allowed to move
-                    let (tr, tc) = intentions[r][c];
-                    cell.position = (tr, tc);
-                    new_cells[tr][tc] = cell;
+                    // We moved away successfully.
+                    // Did someone fill our spot?
+                    match unsafe { *reserved.get_unchecked(r).get_unchecked(c) } {
+                        Some((sr, sc)) => {
+                            let source_cell = unsafe { grid.cells.get_unchecked(sr).get_unchecked(sc) };
+                            let mut moved_cell = source_cell.clone();
+                            moved_cell.position = (r, c);
+                            row_cells.push(moved_cell);
+                        },
+                        None => row_cells.push(Cell::empty_at((r, c))),
+                    }
                 },
                 _ => {
-                    // This cell is blocked or staying.
-                    new_cells[r][c] = cell;
+                    // We stayed put (either intentionally or blocked).
+                    row_cells.push(cell.clone());
                 }
             }
         }
-    }
+        row_cells
+    }).collect();
 
     new_cells
 }
 
-fn resolve_move(r: usize,
-                c: usize,
-                intentions: &Vec<Vec<(usize, usize)>>,
-                reserved: &mut Vec<Vec<Option<(usize, usize)>>>,
-                states: &mut Vec<Vec<ResolveState>>,
-                ) -> bool {
+// Keeping your DFS logic helper exactly as is (it's efficient for the simplified graph)
+#[inline]
+fn resolve_move(
+    r: usize,
+    c: usize,
+    intentions: &Vec<Vec<(usize, usize)>>,
+    reserved: &mut Vec<Vec<Option<(usize, usize)>>>,
+    states: &mut Vec<Vec<ResolveState>>,
+) -> bool {
+    let state = unsafe { *states.get_unchecked(r).get_unchecked(c) };
     
-    // 1. Check Cache / Cycles
-    match states[r][c] {
+    match state {
         ResolveState::Resolved(result) => return result,
-        ResolveState::Visiting => {
-            // Cycle Detected (e.g. A->B->A).
-            return true; 
-        },
+        ResolveState::Visiting => return true,
         _ => {},
     }
 
-    // Mark as currently visiting to detect loops
-    states[r][c] = ResolveState::Visiting;
+    unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Visiting; }
 
-    let (tr, tc) = intentions[r][c];
+    let (tr, tc) = unsafe { *intentions.get_unchecked(r).get_unchecked(c) };
 
-    // 2. Handle Self-Movement (Staying put)
     if tr == r && tc == c {
-        // I am moving to myself. This is always allowed
-        // I "reserve" my own spot.
-        reserved[tr][tc] = Some((r, c));
-        states[r][c] = ResolveState::Resolved(true);
+        unsafe { 
+            *reserved.get_unchecked_mut(tr).get_unchecked_mut(tc) = Some((r, c));
+            *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Resolved(true);
+        }
         return true;
-
-    // 3. Contention Check (First to claim wins)
-    } else if let Some((_owner_r, _owner_c)) = reserved[tr][tc] {
-        // Someone already claimed this target.
-        states[r][c] = ResolveState::Resolved(false);
+    } else if unsafe { reserved.get_unchecked(tr).get_unchecked(tc) }.is_some() {
+        unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Resolved(false); }
         return false;
     } else {
-        // Spot is free to claim. I claim it.
-        reserved[tr][tc] = Some((r, c));
+        unsafe { *reserved.get_unchecked_mut(tr).get_unchecked_mut(tc) = Some((r, c)); }
     }
 
-    // if the target cell is empty
-    if states[tr][tc] == ResolveState::Empty {
-        states[r][c] = ResolveState::Resolved(true);
+    if unsafe { *states.get_unchecked(tr).get_unchecked(tc) } == ResolveState::Empty {
+        unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Resolved(true); }
         return true;
     }
 
-    // 4. Dependency Check (Phantom Collision)
-    // I can move to (tr, tc) IF the person currently there moves away.
-    // Since every cell is an actor, we check the actor at (tr, tc).
-    
     let occupant_can_move = resolve_move(tr, tc, intentions, reserved, states);
     
-    // Determine if the occupant is actually vacating the square.
-    // They vacate if:
-    // a) They are allowed to move (occupant_can_move == true)
-    // b) AND their target is NOT the current spot (they aren't just moving to themselves).
-    let (occ_tr, occ_tc) = intentions[tr][tc];
+    let (occ_tr, occ_tc) = unsafe { *intentions.get_unchecked(tr).get_unchecked(tc) };
     let occupant_vacating = occupant_can_move && ((occ_tr, occ_tc) != (tr, tc));
 
     if occupant_vacating {
-        states[r][c] = ResolveState::Resolved(true);
+        unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Resolved(true); }
         true
     } else {
-        // The actor in front of me is staying.
-        // Therefore, I must stay.
-        states[r][c] = ResolveState::Resolved(false);
+        unsafe { *states.get_unchecked_mut(r).get_unchecked_mut(c) = ResolveState::Resolved(false); }
         false
     }
 }
