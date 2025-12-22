@@ -1,252 +1,220 @@
 use crate::cell::Cell;
 use crate::neighborhood::Neighborhood;
 
-
-/// No movement - cells stay in place
-pub fn rule_static(cell: &Cell, _neighborhood: &Neighborhood, trait_index: usize) -> f32 {
+/// No change - cells maintain their trait value
+#[inline(always)]
+pub fn rule_static(cell: &Cell, _neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
     cell.get_trait(trait_index)
 }
 
-/// Example rule: Average of neighbors' trait values
-pub fn rule_average(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
+/// Average of neighbors' trait values
+pub fn rule_average(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
     let mut sum = 0.0;
     let mut count = 0;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] &&
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
 
-                sum += neighbor.get_trait(trait_index);
-                count += 1;
-            }
-        }
-    }
-    
-    if count == 0 {
-        return cell.get_trait(trait_index);
-    }
-    
-    (sum / count as f32).clamp(0.0, 1.0)
-}
-
-/// Example rule: Conway's Game of Life style (for binary-like traits)
-pub fn rule_conway(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let mut alive_neighbors = 0;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
-
-                if neighbor.get_trait(trait_index) > 0.5 {
-                    alive_neighbors += 1;
-                }
-            }
-        }
-    }
-    
-    let current_val = cell.get_trait(trait_index);
-    
-    if current_val > 0.5 {
-        // Cell is "alive"
-        if alive_neighbors == 2 || alive_neighbors == 3 {
-            1.0
-        } else {
-            0.0
-        }
-    } else {
-        // Cell is "dead"
-        if alive_neighbors == 3 {
-            1.0
-        } else {
-            0.0
-        }
-    }
-}
-
-/// Example rule: Diffusion with decay
-pub fn rule_diffusion(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let mut sum = 0.0;
-    let mut count = 0;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
-
-                sum += neighbor.get_trait(trait_index);
-                count += 1;
-            }
-        }
-    }
-    
-    if count == 0 {
-        return (cell.get_trait(trait_index) * 0.95).clamp(0.0, 1.0);
-    }
-    
-    let current = cell.get_trait(trait_index);
-    let avg_neighbors = sum / count as f32;
-    
-    // Mix 70% average with neighbors, 30% current value, then decay
-    let new_val = (0.3 * current + 0.7 * avg_neighbors) * 0.98;
-    new_val.clamp(0.0, 1.0)
-}
-
-/// Example rule: Maximum of neighbors
-pub fn rule_maximum(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let mut max_neighbor = 0.0f32;
-    let mut found_any = false;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] && 
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
-
-                max_neighbor = max_neighbor.max(neighbor.get_trait(trait_index));
-                found_any = true;
-            }
-        }
-    }
-    
-    if !found_any {
-        return cell.get_trait(trait_index);
-    }
-    
-    max_neighbor.max(cell.get_trait(trait_index) * 0.9).clamp(0.0, 1.0)
-}
-
-/// Example rule: Oscillating behavior
-pub fn rule_oscillate(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let current = cell.get_trait(trait_index);
-    
-    let mut sum = 0.0;
-    let mut count = 0;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
-
-                sum += neighbor.get_trait(trait_index);
-                count += 1;
-            }
-        }
-    }
-    
-    let avg_neighbors = if count == 0 {
-        current
-    } else {
-        sum / count as f32
-    };
-    
-    // Oscillate based on difference from neighbors
-    let diff = (current - avg_neighbors).abs();
-    ((current + diff * 0.5) % 1.0).clamp(0.0, 1.0)
-}
-
-/// Example rule: Weighted average based on distance from center
-pub fn rule_weighted_average(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let mut weighted_sum = 0.0;
-    let mut total_weight = 0.0;
-    
-    for (delta_row, row) in neighborhood.cells.iter().enumerate() {
-        for (delta_col, neighbor) in row.iter().enumerate() {
-            if neighborhood.mask[delta_row][delta_col] && 
-               !(delta_row == neighborhood.center_row && delta_col == neighborhood.center_col) &&
-               !neighborhood.cells[delta_row][delta_col].is_empty() {
-
-                // Calculate distance from center
-                let dr = (delta_row as isize - neighborhood.center_row as isize).abs() as f32;
-                let dc = (delta_col as isize - neighborhood.center_col as isize).abs() as f32;
-                let distance = (dr * dr + dc * dc).sqrt();
-                
-                // Weight inversely proportional to distance (closer = more weight)
-                let weight = 1.0 / (1.0 + distance);
-                
-                weighted_sum += neighbor.get_trait(trait_index) * weight;
-                total_weight += weight;
-            }
-        }
-    }
-    
-    if total_weight == 0.0 {
-        return cell.get_trait(trait_index);
-    }
-    
-    (weighted_sum / total_weight).clamp(0.0, 1.0)
-}
-
-/// Example rule: Only consider direct neighbors (not diagonals)
-pub fn rule_von_neumann(cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-    let mut sum = 0.0;
-    let mut count = 0;
-    
-    let center_row = neighborhood.center_row;
-    let center_col = neighborhood.center_col;
-    
-    // Only check cardinal directions (up, down, left, right)
-    let directions = [
-        (center_row.checked_sub(1), Some(center_col)),  // up
-        (Some(center_row + 1), Some(center_col)),       // down
-        (Some(center_row), center_col.checked_sub(1)),  // left
-        (Some(center_row), Some(center_col + 1)),       // right
-    ];
-    
-    for &(row_opt, col_opt) in &directions {
-        if let (Some(dr), Some(dc)) = (row_opt, col_opt) {
-            if dr < neighborhood.height && dc < neighborhood.width {
-                // Use mask to check if this cell is in the neighborhood
-                if neighborhood.mask[dr][dc] && !neighborhood.cells[dr][dc].is_empty() {
-                    let neighbor = &neighborhood.cells[dr][dc];
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) } {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
                     sum += neighbor.get_trait(trait_index);
                     count += 1;
                 }
             }
         }
     }
-    
+
     if count == 0 {
-        return cell.get_trait(trait_index);
+        cell.get_trait(trait_index)
+    } else {
+        (sum / count as f32).clamp(0.0, 1.0)
     }
-    
-    (sum / count as f32).clamp(0.0, 1.0)
 }
 
-/// Rule collection for easy trait assignment
+/// Conway's Game of Life style (binary traits)
+pub fn rule_conway(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut alive_neighbors = 0;
+    let center_row = neighborhood_traits.center_row;
+    let center_col = neighborhood_traits.center_col;
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) }
+                && !(r == center_row && c == center_col)
+            {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() && neighbor.get_trait(trait_index) > 0.5 {
+                    alive_neighbors += 1;
+                }
+            }
+        }
+    }
+
+    let current = cell.get_trait(trait_index);
+
+    if current > 0.5 {
+        if alive_neighbors == 2 || alive_neighbors == 3 { 1.0 } else { 0.0 }
+    } else {
+        if alive_neighbors == 3 { 1.0 } else { 0.0 }
+    }
+}
+
+/// Diffusion with decay
+pub fn rule_diffusion(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    let center_row = neighborhood_traits.center_row;
+    let center_col = neighborhood_traits.center_col;
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) }
+                && !(r == center_row && c == center_col)
+            {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
+                    sum += neighbor.get_trait(trait_index);
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        return (cell.get_trait(trait_index) * 0.95).clamp(0.0, 1.0);
+    }
+
+    let current = cell.get_trait(trait_index);
+    let avg = sum / count as f32;
+
+    ((0.3 * current + 0.7 * avg) * 0.98).clamp(0.0, 1.0)
+}
+
+/// Maximum of neighbors
+pub fn rule_maximum(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut max_val = cell.get_trait(trait_index);
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) } {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
+                    max_val = max_val.max(neighbor.get_trait(trait_index));
+                }
+            }
+        }
+    }
+
+    (max_val * 0.98).clamp(0.0, 1.0)
+}
+
+/// Minimum of neighbors
+pub fn rule_minimum(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut min_val = cell.get_trait(trait_index);
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) } {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
+                    min_val = min_val.min(neighbor.get_trait(trait_index));
+                }
+            }
+        }
+    }
+
+    min_val.clamp(0.0, 1.0)
+}
+
+/// Weighted average by distance
+pub fn rule_weighted_average(cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut sum = 0.0;
+    let mut weight_sum = 0.0;
+
+    let cr = neighborhood_traits.center_row;
+    let cc = neighborhood_traits.center_col;
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) }
+                && !(r == cr && c == cc)
+            {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
+                    let dr = (r as isize - cr as isize).abs() as f32;
+                    let dc = (c as isize - cc as isize).abs() as f32;
+                    let w = 1.0 / (1.0 + (dr * dr + dc * dc).sqrt());
+
+                    sum += neighbor.get_trait(trait_index) * w;
+                    weight_sum += w;
+                }
+            }
+        }
+    }
+
+    if weight_sum == 0.0 {
+        cell.get_trait(trait_index)
+    } else {
+        (sum / weight_sum).clamp(0.0, 1.0)
+    }
+}
+
+/// Majority rule (quantized)
+pub fn rule_majority(_cell: &Cell, neighborhood_traits: &Neighborhood, trait_index: usize) -> f32 {
+    let mut bins = [0u32; 5];
+
+    for r in 0..neighborhood_traits.height {
+        for c in 0..neighborhood_traits.width {
+            if unsafe { *neighborhood_traits.mask.get_unchecked(r).get_unchecked(c) } {
+                let neighbor = unsafe { neighborhood_traits.cells.get_unchecked(r).get_unchecked(c) };
+                if !neighbor.is_empty() {
+                    let v = neighbor.get_trait(trait_index);
+                    let bin = ((v * 5.0).floor() as usize).min(4);
+                    bins[bin] += 1;
+                }
+            }
+        }
+    }
+
+    let max_bin = bins.iter()
+        .enumerate()
+        .max_by_key(|(_, count)| *count)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    ((max_bin as f32 + 0.5) / 5.0).clamp(0.0, 1.0)
+}
+
+/// Rule collection
 pub struct RuleSet {
     pub rules: [fn(&Cell, &Neighborhood, usize) -> f32; 9],
 }
 
 impl RuleSet {
-    /// Create a default rule set where all traits use the average rule
     pub fn default() -> Self {
         Self {
             rules: [
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
-                rule_average,
+                rule_average, rule_average, rule_average,
+                rule_average, rule_average, rule_average,
+                rule_average, rule_average, rule_average,
             ],
         }
     }
 
-    /// Create a custom rule set
     pub fn custom(rules: [fn(&Cell, &Neighborhood, usize) -> f32; 9]) -> Self {
         Self { rules }
     }
 
-    /// Apply the rule for a specific trait
-    pub fn apply_rule(&self, cell: &Cell, neighborhood: &Neighborhood, trait_index: usize) -> f32 {
-        (self.rules[trait_index])(cell, neighborhood, trait_index)
+    #[inline(always)]
+    pub fn apply_rule(
+        &self,
+        cell: &Cell,
+        neighborhood_traits: &Neighborhood,
+        trait_index: usize,
+    ) -> f32 {
+        let rule = unsafe { *self.rules.get_unchecked(trait_index) };
+        rule(cell, neighborhood_traits, trait_index)
     }
 }
 
@@ -258,32 +226,22 @@ mod tests {
     #[test]
     fn test_rule_average() {
         let grid = Grid::new(3, 3);
-        let mask = vec![
-            vec![true, true, true],
-            vec![true, true, true],
-            vec![true, true, true],
-        ];
-        
-        let neighborhood = Neighborhood::new(3, 3, 1, 1, 1, 1, &mask, &grid);
+        let mask = vec![vec![true; 3]; 3];
+        let neighborhood_traits = Neighborhood::new(3, 3, 1, 1, 1, 1, &mask, &grid);
         let cell = &grid.cells[1][1];
-        
-        let result = rule_average(cell, &neighborhood, 0);
-        assert!(result >= 0.0 && result <= 1.0);
+
+        let result = rule_average(cell, &neighborhood_traits, 0);
+        assert!((0.0..=1.0).contains(&result));
     }
 
     #[test]
     fn test_rule_conway() {
         let grid = Grid::new(3, 3);
-        let mask = vec![
-            vec![true, true, true],
-            vec![true, true, true],
-            vec![true, true, true],
-        ];
-        
-        let neighborhood = Neighborhood::new(3, 3, 1, 1, 1, 1, &mask, &grid);
+        let mask = vec![vec![true; 3]; 3];
+        let neighborhood_traits = Neighborhood::new(3, 3, 1, 1, 1, 1, &mask, &grid);
         let cell = &grid.cells[1][1];
-        
-        let result = rule_conway(cell, &neighborhood, 0);
+
+        let result = rule_conway(cell, &neighborhood_traits, 0);
         assert!(result == 0.0 || result == 1.0);
     }
 }

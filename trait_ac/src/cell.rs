@@ -10,6 +10,7 @@ pub struct Cell {
 
 impl Cell {
     /// Create a new cell with all traits initialized to 0.0
+    #[inline]
     pub fn new(position: (usize, usize)) -> Self {
         Self {
             fingerprint: [0.0; 9],
@@ -19,6 +20,7 @@ impl Cell {
     }
 
     /// Create a static empty cell
+    #[inline(always)]
     pub fn empty() -> &'static Cell {
         static EMPTY_CELL: Cell = Cell {
             fingerprint: [0.0; 9],
@@ -29,6 +31,7 @@ impl Cell {
     }
 
     /// Create an empty cell at a specific position
+    #[inline]
     pub fn empty_at(position: (usize, usize)) -> Self {
         Self {
             fingerprint: [0.0; 9],
@@ -52,6 +55,7 @@ impl Cell {
     }
 
     /// Check if the cell is empty
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.is_empty
     }
@@ -66,22 +70,28 @@ impl Cell {
     }
 
     /// Make a cell empty (clear all traits)
+    #[inline]
     pub fn make_empty(&mut self) {
         self.fingerprint = [0.0; 9];
         self.is_empty = true;
     }
 
     /// Get a specific trait value
+    #[inline(always)]
     pub fn get_trait(&self, index: usize) -> f32 {
-        self.fingerprint[index]
+        unsafe { *self.fingerprint.get_unchecked(index) }
     }
 
     /// Set a specific trait value (clamped to [0.0, 1.0])
+    #[inline(always)]
     pub fn set_trait(&mut self, index: usize, value: f32) {
-        self.fingerprint[index] = value.clamp(0.0, 1.0);
+        unsafe {
+            *self.fingerprint.get_unchecked_mut(index) = value.clamp(0.0, 1.0);
+        }
     }
 
     /// Get the trait index from 2D grid coordinates (row, col)
+    #[inline(always)]
     pub fn trait_index(row: usize, col: usize) -> usize {
         row * 3 + col
     }
@@ -119,10 +129,8 @@ mod tests {
     fn test_fill_and_empty() {
         let mut cell = Cell::empty_at((0, 0));
         assert!(cell.is_empty());
-        
         cell.fill_random();
         assert!(!cell.is_empty());
-        
         cell.make_empty();
         assert!(cell.is_empty());
         assert_eq!(cell.fingerprint, [0.0; 9]);

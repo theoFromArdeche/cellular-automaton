@@ -2,8 +2,10 @@ use eframe::egui;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use trait_ac::grid::Grid;
 use trait_ac::neighborhood::Neighborhood;
-use trait_ac::rules::{rule_static, rule_average, rule_conway, rule_diffusion, rule_maximum, rule_oscillate, rule_weighted_average, rule_von_neumann};
-use trait_ac::movement::{apply_movement, movement_static, movement_random, movement_gradient, movement_avoid_crowding, movement_trait_based};
+use trait_ac::rules::{rule_static, rule_average, rule_conway, rule_diffusion, rule_maximum, rule_weighted_average};
+use trait_ac::movement::{apply_movement, movement_static, movement_random, movement_gradient, movement_avoid_crowding};
+use rayon::prelude::*;
+
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -27,9 +29,7 @@ enum RuleType {
     Conway,
     Diffusion,
     Maximum,
-    Oscillate,
     WeightedAverage,
-    VonNeumann,
 }
 
 impl RuleType {
@@ -40,9 +40,7 @@ impl RuleType {
             Self::Conway,
             Self::Diffusion,
             Self::Maximum,
-            Self::Oscillate,
             Self::WeightedAverage,
-            Self::VonNeumann,
         ]
     }
     
@@ -53,9 +51,7 @@ impl RuleType {
             Self::Conway => "Conway",
             Self::Diffusion => "Diffusion",
             Self::Maximum => "Maximum",
-            Self::Oscillate => "Oscillate",
             Self::WeightedAverage => "Weighted Avg",
-            Self::VonNeumann => "Von Neumann",
         }
     }
     
@@ -66,9 +62,7 @@ impl RuleType {
             Self::Conway => rule_conway,
             Self::Diffusion => rule_diffusion,
             Self::Maximum => rule_maximum,
-            Self::Oscillate => rule_oscillate,
             Self::WeightedAverage => rule_weighted_average,
-            Self::VonNeumann => rule_von_neumann,
         }
     }
 }
@@ -79,7 +73,6 @@ enum MovementType {
     Random,
     Gradient,
     AvoidCrowding,
-    TraitBased,
 }
 
 impl MovementType {
@@ -89,7 +82,6 @@ impl MovementType {
             Self::Random,
             Self::Gradient,
             Self::AvoidCrowding,
-            Self::TraitBased,
         ]
     }
     
@@ -99,7 +91,6 @@ impl MovementType {
             Self::Random => "Random",
             Self::Gradient => "Gradient",
             Self::AvoidCrowding => "Avoid Crowding",
-            Self::TraitBased => "Trait Based",
         }
     }
 }
@@ -210,7 +201,7 @@ impl Default for CAApp {
             RuleType::Average,
             RuleType::Conway,
             RuleType::Maximum,
-            RuleType::Oscillate,
+            RuleType::Average,
             RuleType::Average,
             RuleType::Diffusion,
             RuleType::Average,
@@ -265,45 +256,48 @@ impl CAApp {
             &dummy_grid,
         );
         
-        // Update traits
-        let mut new_cells = Vec::new();
-        
-        for row in 0..self.grid.height {
-            let mut new_row = Vec::new();
-            for col in 0..self.grid.width {
-                let cell = &self.grid.cells[row][col];
-                let mut new_cell = cell.clone();
-                if new_cell.is_empty() {
-                    new_row.push(new_cell);
-                    continue;
-                }
 
-                let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &self.grid);
-                
-                for mask_row in 0..3 {
-                    for mask_col in 0..3 {
-                        if self.active_mask[mask_row][mask_col] {
-                            let trait_idx = mask_row * 3 + mask_col;
-                            let rule_fn = self.trait_rules[trait_idx].get_rule_fn();
-                            let new_value = rule_fn(cell, &neighborhood, trait_idx);
-                            new_cell.set_trait(trait_idx, new_value);
+        let mut new_cells: Vec<Vec<_>> = (0..self.grid.height)
+            .into_par_iter()
+            .map(|row| {
+                let mut new_row = Vec::with_capacity(self.grid.width);
+                for col in 0..self.grid.width {
+                    let cell = &self.grid.cells[row][col];
+                    
+                    if cell.is_empty() {
+                        new_row.push(cell.clone());
+                        continue;
+                    }
+                    
+                    let mut new_cell = cell.clone();
+                    let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &self.grid);
+
+                    // Update only active traits
+                    for mask_row in 0..3 {
+                        for mask_col in 0..3 {
+                            if self.active_mask[mask_row][mask_col] {
+                                let trait_idx = mask_row * 3 + mask_col;
+                                let rule_fn = self.trait_rules[trait_idx].get_rule_fn();
+                                let new_value = rule_fn(cell, &neighborhood, trait_idx);
+                                new_cell.set_trait(trait_idx, new_value);
+                            }
                         }
                     }
+
+                    new_row.push(new_cell);
                 }
-                
-                new_row.push(new_cell);
-            }
-            new_cells.push(new_row);
-        }
-        self.grid.update_cells(new_cells);
-        
+                new_row
+            })
+            .collect();
+
+        self.grid.update_cells_fast(&mut new_cells);
+ 
         // Apply movement
         let movement_fn = match self.movement_type {
             MovementType::Static => movement_static,
             MovementType::Random => movement_random,
             MovementType::Gradient => movement_gradient,
             MovementType::AvoidCrowding => movement_avoid_crowding,
-            MovementType::TraitBased => movement_trait_based,
         };
         
         let nbhr_movement_mask = vec![
@@ -317,8 +311,8 @@ impl CAApp {
             &dummy_grid,
         );
         
-        let moved_cells = apply_movement(movement_fn, &nbhr_movement_base, &self.grid);
-        self.grid.update_cells(moved_cells);
+        let mut moved_cells = apply_movement(movement_fn, &nbhr_movement_base, &self.grid);
+        self.grid.update_cells_fast(&mut moved_cells);
         
         self.timestep += 1;
     }
@@ -383,9 +377,9 @@ impl eframe::App for CAApp {
             // Grid size
             ui.label("Grid Configuration");
             let mut changed = false;
-            changed |= ui.add(egui::Slider::new(&mut self.grid_width, 5..=250)
+            changed |= ui.add(egui::Slider::new(&mut self.grid_width, 5..=500)
                 .text("Width")).changed();
-            changed |= ui.add(egui::Slider::new(&mut self.grid_height, 5..=250)
+            changed |= ui.add(egui::Slider::new(&mut self.grid_height, 5..=500)
                 .text("Height")).changed();
             changed |= ui.add(egui::Slider::new(&mut self.grid_density, 0.01..=1.0)
                 .text("Density")).changed();
@@ -478,7 +472,7 @@ impl eframe::App for CAApp {
                             });
                     });
                     ui.add(egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color"));
-                    ui.add(egui::Slider::new(&mut self.cell_size, 5.0..=60.0).text("Cell Size"));
+                    ui.add(egui::Slider::new(&mut self.cell_size, 1.0..=60.0).text("Cell Size"));
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
 
