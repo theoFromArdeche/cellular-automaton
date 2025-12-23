@@ -1,5 +1,7 @@
 use rand::Rng;
 
+
+
 /// A cell with a 9-trait fingerprint
 #[derive(Clone, Debug)]
 pub struct Cell {
@@ -96,6 +98,10 @@ impl Cell {
         row * 3 + col
     }
 }
+
+
+
+
 
 #[cfg(test)]
 mod tests {

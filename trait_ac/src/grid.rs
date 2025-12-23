@@ -1,6 +1,8 @@
 use crate::cell::Cell;
 use rand::Rng;
 
+
+
 /// Represents a 2D grid of cells
 pub struct Grid {
     pub width: usize,
@@ -120,6 +122,10 @@ impl Grid {
         self.count_filled_cells() as f32 / total_cells as f32
     }
 }
+
+
+
+
 
 #[cfg(test)]
 mod tests {
