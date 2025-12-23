@@ -120,10 +120,11 @@ struct CAApp {
     selected_trait: usize,
     cell_size: f32,
     show_values: bool,
+    show_values_minimum_cell_size: f32,
     color_scheme: ColorScheme,
     base_color_no_actor: f32,
-    min_cell_size: f32,
-    max_cell_size: f32,
+    cell_size_min: f32,
+    cell_size_max: f32,
     
     // Trait names
     trait_names: [String; 9],
@@ -145,7 +146,17 @@ impl Default for CAApp {
         let grid_height_max = 1000;
 
         let steps_per_second_min = 1.0;
-        let steps_per_second_max = 200.0;
+        let steps_per_second_max = 500.0;
+
+        let cell_size = 3.0;
+        let cell_size_min = 1.0;
+        let cell_size_max = 100.0;
+
+        let show_values = false;
+        let show_values_minimum_cell_size = 20.0;
+
+        let color_scheme = ColorScheme::Viridis;
+        let base_color_no_actor = 0.1;
 
         let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
         let initial_selected_trait = active_traits[0];
@@ -236,12 +247,13 @@ impl Default for CAApp {
             steps_per_second_max,
             
             selected_trait: initial_selected_trait,
-            cell_size: 3.0,
-            show_values: false,
-            color_scheme: ColorScheme::Viridis,
-            base_color_no_actor: 0.1,
-            min_cell_size: 1.0,
-            max_cell_size: 100.0,
+            cell_size,
+            show_values,
+            show_values_minimum_cell_size,
+            color_scheme,
+            base_color_no_actor,
+            cell_size_min,
+            cell_size_max,
 
             trait_names,
         }
@@ -290,7 +302,7 @@ impl CAApp {
     fn reset_grid(&mut self) {
         self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density);
         self.timestep = 0;
-        self.is_playing = false;
+        self.time_accumulator = 0.0;
     }
     
     fn randomize_grid(&mut self) {
@@ -346,14 +358,44 @@ impl CAApp {
 
 impl eframe::App for CAApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle keyboard input
+        ctx.input(|i| {
+            // Spacebar to play/pause
+            if i.key_pressed(egui::Key::Space) {
+                self.is_playing = !self.is_playing;
+            }
+            // Delete key to reset
+            if i.key_pressed(egui::Key::Delete) {
+                self.reset_grid();
+            }
+        });
+
         // Handle animation
         if self.is_playing {
             self.time_accumulator += ctx.input(|i| i.stable_dt);
             let step_duration = 1.0 / self.steps_per_second;
             
-            while self.time_accumulator >= step_duration {
+            // Adaptive step limiting based on frame time
+            let frame_time = ctx.input(|i| i.stable_dt);
+            let target_frame_time = 1.0 / 60.0; // Target 60 FPS
+            
+            // Calculate how many steps we can afford this frame
+            let max_steps = if frame_time > target_frame_time * 1.5 {
+                1 // If we're lagging, only do 1 step per frame
+            } else {
+                10 // Otherwise allow up to 10 steps per frame
+            };
+            
+            let mut steps_taken = 0;
+            while self.time_accumulator >= step_duration && steps_taken < max_steps {
                 self.step_simulation();
                 self.time_accumulator -= step_duration;
+                steps_taken += 1;
+            }
+            
+            // Drop excess time if we can't keep up
+            if self.time_accumulator > step_duration * 2.0 {
+                self.time_accumulator = 0.0;
             }
             
             ctx.request_repaint();
@@ -517,7 +559,7 @@ impl eframe::App for CAApp {
                     }
 
                     ui.add(
-                        egui::Slider::new(&mut self.cell_size, self.min_cell_size..=self.max_cell_size)
+                        egui::Slider::new(&mut self.cell_size, self.cell_size_min..=self.cell_size_max)
                             .text("Cell Size")
                     );
                     
@@ -588,10 +630,89 @@ impl eframe::App for CAApp {
                 )
             });
 
-
             let image_response = scroll_output.inner;
-            let rect = scroll_output.inner_rect;
-            let pointer_over = ui.rect_contains_pointer(rect);
+            let viewport_rect = scroll_output.inner_rect;
+            let pointer_over = ui.rect_contains_pointer(viewport_rect);
+
+            // Draw values on top if zoomed in enough
+            if self.show_values && self.cell_size >= self.show_values_minimum_cell_size {
+                let painter = ui.painter();
+                let values = self.grid.get_trait_array(self.selected_trait);
+                
+                // Calculate visible cell range
+                let scroll_offset = scroll_output.state.offset;
+                
+                let start_col = (scroll_offset.x / self.cell_size).floor() as usize;
+                let start_row = (scroll_offset.y / self.cell_size).floor() as usize;
+                let visible_cols = (viewport_rect.width() / self.cell_size).ceil() as usize + 1;
+                let visible_rows = (viewport_rect.height() / self.cell_size).ceil() as usize + 1;
+                let end_col = (start_col + visible_cols).min(self.grid_width);
+                let end_row = (start_row + visible_rows).min(self.grid_height);
+                
+                // Capture needed values to avoid borrowing issues
+                let grid_width = self.grid_width;
+                let cell_size = self.cell_size;
+                let cells = &self.grid.cells;
+                
+                // Create index pairs for only visible cells
+                let visible_cells: Vec<_> = (start_row..end_row)
+                    .flat_map(|row| {
+                        (start_col..end_col).map(move |col| (row, col))
+                    })
+                    .collect();
+                
+                // Process visible cells in parallel
+                let text_data: Vec<_> = visible_cells
+                    .par_iter()
+                    .filter_map(|&(row, col)| {
+                        let idx = row * grid_width + col;
+                        let value = values[idx];
+                        
+                        // Skip empty cells
+                        if cells[row][col].is_empty() {
+                            return None;
+                        }
+                        
+                        // Calculate cell center in screen coordinates
+                        let cell_x = viewport_rect.min.x + (col as f32 + 0.5) * cell_size - scroll_offset.x;
+                        let cell_y = viewport_rect.min.y + (row as f32 + 0.5) * cell_size - scroll_offset.y;
+                        let pos = egui::pos2(cell_x, cell_y);
+                        
+                        let cell_color = self.color_scheme.map_value(
+                            value,
+                            false,
+                            self.base_color_no_actor,
+                        );
+                        
+                        // Calculate luminance (perceived brightness)
+                        // Using the standard formula for relative luminance
+                        let luminance = 0.2126 * cell_color[0] as f32 
+                                    + 0.7152 * cell_color[1] as f32 
+                                    + 0.0722 * cell_color[2] as f32;
+                        
+                        // Choose white text for dark backgrounds, black for light backgrounds
+                        let text_color = if luminance < 128.0 {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::BLACK
+                        };
+                        
+                        Some((pos, value, text_color))
+                    })
+                    .collect();
+                
+                // Draw all text (must be done on main thread due to painter)
+                let font_size = (self.cell_size * 0.4).min(14.0);
+                for (pos, value, text_color) in text_data {
+                    painter.text(
+                        pos,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{:.1}", value),
+                        egui::FontId::proportional(font_size),
+                        text_color,
+                    );
+                }
+            }
 
             // --------------------------------------------------
             // PAN via mouse drag
@@ -648,10 +769,10 @@ impl eframe::App for CAApp {
                         .clamp(0.9, 1.1);
 
                     self.cell_size = (self.cell_size * zoom_factor)
-                        .clamp(self.min_cell_size, self.max_cell_size);
+                        .clamp(self.cell_size_min, self.cell_size_max);
 
                     if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                        let rel = pos - rect.min;
+                        let rel = pos - viewport_rect.min;
 
                         let state = scroll_output.state.clone();
 
@@ -665,7 +786,7 @@ impl eframe::App for CAApp {
                             self.grid_width as f32 * self.cell_size,
                             self.grid_height as f32 * self.cell_size,
                         );
-                        let visible_size = rect.size();
+                        let visible_size = viewport_rect.size();
 
                         new_offset.x = new_offset.x.clamp(
                             0.0,
