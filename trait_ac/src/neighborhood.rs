@@ -1,6 +1,35 @@
 use crate::cell::Cell;
 use crate::grid::Grid;
 
+
+#[derive(Clone, Debug)]
+pub struct NeighborhoodSettings {
+    pub width: usize,
+    pub height: usize,
+    pub center_row: usize,
+    pub center_col: usize,
+    pub mask: Vec<Vec<bool>>,
+}
+
+impl NeighborhoodSettings {
+    pub fn new(
+        width: usize,
+        height: usize,
+        center_row: usize,
+        center_col: usize,
+        mask: Vec<Vec<bool>>,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            center_row,
+            center_col,
+            mask,
+        }
+    }
+}
+
+
 /// A read-only view of cells around a center position
 pub struct Neighborhood<'a> {
     pub width: usize,
@@ -16,16 +45,16 @@ pub struct Neighborhood<'a> {
 impl<'a> Neighborhood<'a> {
     /// Create a new neighborhood view for a specific grid position
     #[inline]
-    pub fn new(
-        width: usize,
-        height: usize,
-        center_row: usize,
-        center_col: usize,
-        row: usize,
-        col: usize,
-        mask: &'a [Vec<bool>],
-        grid: &'a Grid,
-    ) -> Self {
+    pub fn new(width: usize,
+               height: usize,
+               center_row: usize,
+               center_col: usize,
+               row: usize,
+               col: usize,
+               mask: &'a [Vec<bool>],
+               grid: &'a Grid,
+               ) -> Self {
+
         let mut cells = Vec::with_capacity(height);
         
         for delta_row in 0..height {
@@ -57,12 +86,7 @@ impl<'a> Neighborhood<'a> {
 
     /// Create a new neighborhood using an existing neighborhood as a template
     #[inline(always)]
-    pub fn new_from_base(
-        row: usize,
-        col: usize,
-        base: &Neighborhood<'a>,
-        grid: &'a Grid,
-    ) -> Self {
+    pub fn new_from_settings(row: usize, col: usize, base: &'a NeighborhoodSettings, grid: &'a Grid) -> Self {
         Self::new(
             base.width,
             base.height,
@@ -70,7 +94,7 @@ impl<'a> Neighborhood<'a> {
             base.center_col,
             row,
             col,
-            base.mask,
+            &base.mask,
             grid,
         )
     }
@@ -97,6 +121,10 @@ impl<'a> Neighborhood<'a> {
         self.update_cells(grid);
     }
 }
+
+
+
+
 
 #[cfg(test)]
 mod tests {

@@ -1,10 +1,12 @@
 use eframe::egui;
-use egui::{Color32, Pos2, Rect, Stroke, Vec2};
+use egui::{Color32};
 use trait_ac::grid::Grid;
-use trait_ac::neighborhood::Neighborhood;
-use trait_ac::rules::{rule_static, rule_average, rule_conway, rule_diffusion, rule_maximum, rule_weighted_average};
-use trait_ac::movement::{apply_movement, movement_static, movement_random, movement_gradient, movement_avoid_crowding};
+use trait_ac::neighborhood::{Neighborhood, NeighborhoodSettings};
+use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
+use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
+use trait_ac::utils::{semantic_traits_names};
 use rayon::prelude::*;
+
 
 
 fn main() -> eframe::Result<()> {
@@ -20,108 +22,6 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|_cc| Ok(Box::new(CAApp::default()))),
     )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum RuleType {
-    Static,
-    Average,
-    Conway,
-    Diffusion,
-    Maximum,
-    WeightedAverage,
-}
-
-impl RuleType {
-    fn all() -> Vec<Self> {
-        vec![
-            Self::Static,
-            Self::Average,
-            Self::Conway,
-            Self::Diffusion,
-            Self::Maximum,
-            Self::WeightedAverage,
-        ]
-    }
-    
-    fn name(&self) -> &str {
-        match self {
-            Self::Static => "Static",
-            Self::Average => "Average",
-            Self::Conway => "Conway",
-            Self::Diffusion => "Diffusion",
-            Self::Maximum => "Maximum",
-            Self::WeightedAverage => "Weighted Avg",
-        }
-    }
-    
-    fn get_rule_fn(&self) -> fn(&trait_ac::cell::Cell, &Neighborhood, usize) -> f32 {
-        match self {
-            Self::Static => rule_static,
-            Self::Average => rule_average,
-            Self::Conway => rule_conway,
-            Self::Diffusion => rule_diffusion,
-            Self::Maximum => rule_maximum,
-            Self::WeightedAverage => rule_weighted_average,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum MovementType {
-    Static,
-    Random,
-    Gradient,
-    AvoidCrowding,
-}
-
-impl MovementType {
-    fn all() -> Vec<Self> {
-        vec![
-            Self::Static,
-            Self::Random,
-            Self::Gradient,
-            Self::AvoidCrowding,
-        ]
-    }
-    
-    fn name(&self) -> &str {
-        match self {
-            Self::Static => "Static",
-            Self::Random => "Random",
-            Self::Gradient => "Gradient",
-            Self::AvoidCrowding => "Avoid Crowding",
-        }
-    }
-}
-
-struct CAApp {
-    // Grid state
-    grid: Grid,
-    grid_width: usize, // usefull if the Grid object is reset
-    grid_height: usize,
-    grid_density: f32,
-    
-    // Simulation state
-    timestep: usize,
-    is_playing: bool,
-    steps_per_second: f32,
-    time_accumulator: f32,
-    
-    // Configuration
-    active_mask: Vec<Vec<bool>>,
-    trait_rules: Vec<RuleType>,
-    movement_type: MovementType,
-    
-    // Visualization
-    selected_trait: usize,
-    cell_size: f32,
-    show_values: bool,
-    color_scheme: ColorScheme,
-    base_color_no_actor: f32,
-    
-    // Trait names
-    trait_names: [String; 9],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,79 +83,173 @@ impl ColorScheme {
     }
 }
 
+
+
+
+
+struct CAApp {
+    // Grid state
+    grid: Grid,
+    grid_width: usize, // usefull if the Grid object is reset
+    grid_height: usize,
+    grid_density: f32,
+    
+    // Simulation state
+    timestep: usize,
+    is_playing: bool,
+    steps_per_second: f32,
+    time_accumulator: f32,
+    grid_texture: Option<egui::TextureHandle>,
+    central_panel_offset: Option<egui::Vec2>,
+    last_rendered_timestep: usize,
+    
+    // Configuration
+    active_traits: Vec<usize>,
+    neighborhood_traits_settings: NeighborhoodSettings,
+    neighborhood_mvt_settings: NeighborhoodSettings,
+    rules_registry: RulesRegistry,
+    movement_registry: MovementRegistry,
+    grid_width_min: usize,
+    grid_width_max: usize,
+    grid_height_min: usize,
+    grid_height_max: usize,
+    steps_per_second_min: f32,
+    steps_per_second_max: f32,
+    
+    // Visualization
+    selected_trait: usize,
+    cell_size: f32,
+    show_values: bool,
+    color_scheme: ColorScheme,
+    base_color_no_actor: f32,
+    min_cell_size: f32,
+    max_cell_size: f32,
+    
+    // Trait names
+    trait_names: [String; 9],
+}
+
 impl Default for CAApp {
     fn default() -> Self {
-        let grid_width = 20;
-        let grid_height = 20;
-        let grid_density = 0.33;
+        // Configuration
+        let grid_width = 500;
+        let grid_height = 500;
+        let steps_per_second = 25.0;
+        let grid_density = 1.0;
+
+
+        let grid_width_min = 3;
+        let grid_width_max = 1000;
+
+        let grid_height_min = 3;
+        let grid_height_max = 1000;
+
+        let steps_per_second_min = 1.0;
+        let steps_per_second_max = 200.0;
+
+        let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
+        let initial_selected_trait = active_traits[0];
+
+        // Neighborhood mask
+        let neighborhood_traits_mask = vec![
+            vec![true, true, true],
+            vec![true, true, true],
+            vec![true, true, true],
+        ];
+
+        let neighborhood_mvt_mask = vec![
+            vec![true, true, true],
+            vec![true, true, true],
+            vec![true, true, true],
+        ];
+
+        let neighborhood_traits_height = neighborhood_traits_mask.len();
+        let neighborhood_traits_width = neighborhood_traits_mask[0].len();
+        let neighborhood_traits_center_row = (neighborhood_traits_height - 1) / 2;
+        let neighborhood_traits_center_col = (neighborhood_traits_width - 1) / 2;
+
+        let neighborhood_mvt_height = neighborhood_mvt_mask.len();
+        let neighborhood_mvt_width = neighborhood_mvt_mask[0].len();
+        let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
+        let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
+
+        // Initialize grid
         let grid = Grid::new_with_density(grid_width, grid_height, grid_density);
-        
-        let active_mask = vec![
-            vec![true, true, false],
-            vec![false, true, false],
-            vec![true, false, false],
+
+
+        // Default neighborhood
+        let neighborhood_traits_settings = NeighborhoodSettings::new(
+            neighborhood_traits_width,
+            neighborhood_traits_height,
+            neighborhood_traits_center_row,
+            neighborhood_traits_center_col,
+            neighborhood_traits_mask,
+        );
+
+        let neighborhood_mvt_settings = NeighborhoodSettings::new(
+            neighborhood_mvt_width,
+            neighborhood_mvt_height,
+            neighborhood_mvt_center_row,
+            neighborhood_mvt_center_col,
+            neighborhood_mvt_mask,
+        );
+
+        // Define trait names
+        let trait_names = semantic_traits_names();
+
+        // Create custom rule set
+        let rules: [RuleFn; 9] = [
+                Rules::conway, Rules::conway, Rules::conway,
+                Rules::conway, Rules::conway, Rules::conway,
+                Rules::conway, Rules::conway, Rules::conway,
         ];
-        
-        let trait_rules = vec![
-            RuleType::Diffusion,
-            RuleType::Average,
-            RuleType::Conway,
-            RuleType::Maximum,
-            RuleType::Average,
-            RuleType::Average,
-            RuleType::Diffusion,
-            RuleType::Average,
-            RuleType::Average,
-        ];
+        let rules_registry = RulesRegistry::custom(rules);
+
+        let movement_function: MovementFn = Movements::static_movement; 
+        let movement_registry = MovementRegistry::custom(movement_function);
+
         
         Self {
             grid,
             grid_width,
             grid_height,
             grid_density,
+
             timestep: 0,
             is_playing: false,
-            steps_per_second: 2.0,
+            steps_per_second,
             time_accumulator: 0.0,
-            active_mask,
-            trait_rules,
-            movement_type: MovementType::Static,
-            selected_trait: 0,
-            cell_size: 30.0,
+            grid_texture: None,
+            central_panel_offset: None,
+            last_rendered_timestep: 999999,
+
+            active_traits,
+            neighborhood_traits_settings,
+            neighborhood_mvt_settings,
+            rules_registry,
+            movement_registry,
+            grid_width_min,
+            grid_width_max,
+            grid_height_min,
+            grid_height_max,
+            steps_per_second_min,
+            steps_per_second_max,
+            
+            selected_trait: initial_selected_trait,
+            cell_size: 3.0,
             show_values: false,
             color_scheme: ColorScheme::Viridis,
             base_color_no_actor: 0.1,
-            trait_names: [
-                "Energy".to_string(),
-                "Confidence".to_string(),
-                "Cooperation".to_string(),
-                "Aggression".to_string(),
-                "Stability".to_string(),
-                "Mobility".to_string(),
-                "Resource".to_string(),
-                "Age".to_string(),
-                "Adaptability".to_string(),
-            ],
+            min_cell_size: 1.0,
+            max_cell_size: 100.0,
+
+            trait_names,
         }
     }
 }
 
 impl CAApp {
     fn step_simulation(&mut self) {
-        // Create neighborhood masks
-        let neighborhood_mask = vec![
-            vec![true, true, true],
-            vec![true, true, true],
-            vec![true, true, true],
-        ];
-        
-        let dummy_grid = Grid::new(self.grid_width, self.grid_height);
-        let neighborhood_base = Neighborhood::new(
-            3, 3, 1, 1, 0, 0,
-            &neighborhood_mask,
-            &dummy_grid,
-        );
-        
 
         let mut new_cells: Vec<Vec<_>> = (0..self.grid.height)
             .into_par_iter()
@@ -270,18 +264,12 @@ impl CAApp {
                     }
                     
                     let mut new_cell = cell.clone();
-                    let neighborhood = Neighborhood::new_from_base(row, col, &neighborhood_base, &self.grid);
+                    let neighborhood_traits = Neighborhood::new_from_settings(row, col, &self.neighborhood_traits_settings, &self.grid);
 
                     // Update only active traits
-                    for mask_row in 0..3 {
-                        for mask_col in 0..3 {
-                            if self.active_mask[mask_row][mask_col] {
-                                let trait_idx = mask_row * 3 + mask_col;
-                                let rule_fn = self.trait_rules[trait_idx].get_rule_fn();
-                                let new_value = rule_fn(cell, &neighborhood, trait_idx);
-                                new_cell.set_trait(trait_idx, new_value);
-                            }
-                        }
+                    for &trait_idx in &self.active_traits {
+                        let new_value = self.rules_registry.apply_rule(cell, &neighborhood_traits, trait_idx);
+                        new_cell.set_trait(trait_idx, new_value);
                     }
 
                     new_row.push(new_cell);
@@ -291,27 +279,9 @@ impl CAApp {
             .collect();
 
         self.grid.update_cells_fast(&mut new_cells);
- 
-        // Apply movement
-        let movement_fn = match self.movement_type {
-            MovementType::Static => movement_static,
-            MovementType::Random => movement_random,
-            MovementType::Gradient => movement_gradient,
-            MovementType::AvoidCrowding => movement_avoid_crowding,
-        };
-        
-        let nbhr_movement_mask = vec![
-            vec![true, true, true],
-            vec![true, true, true],
-            vec![true, true, true],
-        ];
-        let nbhr_movement_base = Neighborhood::new(
-            3, 3, 1, 1, 0, 0,
-            &nbhr_movement_mask,
-            &dummy_grid,
-        );
-        
-        let mut moved_cells = apply_movement(movement_fn, &nbhr_movement_base, &self.grid);
+
+        // Step 2: Apply movement
+        let mut moved_cells = self.movement_registry.apply_movement(&self.neighborhood_mvt_settings, &self.grid);
         self.grid.update_cells_fast(&mut moved_cells);
         
         self.timestep += 1;
@@ -327,7 +297,52 @@ impl CAApp {
         self.grid.randomize();
         self.timestep = 0;
     }
+
+    fn update_grid_texture(&mut self, ctx: &egui::Context) {
+        let values = self.grid.get_trait_array(self.selected_trait);
+        let width = self.grid_width;
+        let height = self.grid_height;
+
+        // Allocate once, fixed size
+        let mut pixels = vec![egui::Color32::BLACK; width * height];
+
+        pixels
+            .par_chunks_mut(width)
+            .enumerate()
+            .for_each(|(row, row_pixels)| {
+                let grid_row = &self.grid.cells[row];
+                let base = row * width;
+
+                for col in 0..width {
+                    let idx = base + col;
+                    let is_empty = grid_row[col].is_empty();
+                    row_pixels[col] = self.color_scheme.map_value(
+                        values[idx],
+                        is_empty,
+                        self.base_color_no_actor,
+                    );
+                }
+            });
+
+        let image = egui::ColorImage {
+            size: [width, height],
+            pixels,
+        };
+
+        self.grid_texture = Some(ctx.load_texture(
+            "grid_tex",
+            image,
+            egui::TextureOptions::NEAREST,
+        ));
+
+        self.last_rendered_timestep = self.timestep;
+    }
+
 }
+
+
+
+
 
 impl eframe::App for CAApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -343,6 +358,8 @@ impl eframe::App for CAApp {
             
             ctx.request_repaint();
         }
+
+        let mut flag_update_texture = false;
         
         // Left panel: Controls
         egui::SidePanel::left("controls").min_width(300.0).show(ctx, |ui| {
@@ -367,7 +384,7 @@ impl eframe::App for CAApp {
                 self.randomize_grid();
             }
             
-            ui.add(egui::Slider::new(&mut self.steps_per_second, 0.1..=100.0)
+            ui.add(egui::Slider::new(&mut self.steps_per_second, self.steps_per_second_min..=self.steps_per_second_max)
                 .text("Steps/sec"));
             
             ui.label(format!("Timestep: {}", self.timestep));
@@ -377,13 +394,14 @@ impl eframe::App for CAApp {
             // Grid size
             ui.label("Grid Configuration");
             let mut changed = false;
-            changed |= ui.add(egui::Slider::new(&mut self.grid_width, 5..=500)
+            changed |= ui.add(egui::Slider::new(&mut self.grid_width, self.grid_width_min..=self.grid_width_max)
                 .text("Width")).changed();
-            changed |= ui.add(egui::Slider::new(&mut self.grid_height, 5..=500)
+            changed |= ui.add(egui::Slider::new(&mut self.grid_height, self.grid_height_min..=self.grid_height_max)
                 .text("Height")).changed();
             changed |= ui.add(egui::Slider::new(&mut self.grid_density, 0.01..=1.0)
                 .text("Density")).changed();
             if changed {
+                flag_update_texture=true;
                 self.reset_grid();
             }
             
@@ -392,48 +410,64 @@ impl eframe::App for CAApp {
             // Movement type
             ui.label("Movement Type");
             egui::ComboBox::from_id_salt("movement")
-                .selected_text(self.movement_type.name())
+                .selected_text(self.movement_registry.get_movement_name())
                 .show_ui(ui, |ui| {
-                    for mt in MovementType::all() {
-                        ui.selectable_value(&mut self.movement_type, mt, mt.name());
+                    for &name in MovementRegistry::get_all_names() {
+                        if let Some(movement_fn) = MovementRegistry::get_movement_by_name(name) {
+                            let is_selected = self.movement_registry.is_stored_function(movement_fn);
+                            if ui.selectable_label(is_selected, name).clicked() {
+                                self.movement_registry.set_movement_function(movement_fn);
+                            }
+                        }
                     }
                 });
-            
+
             ui.separator();
-            
-            // Trait configuration
+
+            // Active Traits configuration
             ui.label("Active Traits");
             egui::Grid::new("trait_grid").show(ui, |ui| {
                 for mask_row in 0..3 {
                     for mask_col in 0..3 {
                         let trait_idx = mask_row * 3 + mask_col;
-                        let mut active = self.active_mask[mask_row][mask_col];
+                        let mut active = self.active_traits.contains(&trait_idx);
                         if ui.checkbox(&mut active, &self.trait_names[trait_idx]).changed() {
-                            self.active_mask[mask_row][mask_col] = active;
+                            if active {
+                                // Add trait if not already present
+                                if !self.active_traits.contains(&trait_idx) {
+                                    self.active_traits.push(trait_idx);
+                                }
+                            } else {
+                                // Remove trait
+                                self.active_traits.retain(|&idx| idx != trait_idx);
+                            }
                         }
                     }
                     ui.end_row();
                 }
             });
-            
+
             ui.separator();
-            
+
             // Trait rules
             ui.label("Trait Rules");
             egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
-                for trait_idx in 0..9 {
-                    if self.active_mask[trait_idx / 3][trait_idx % 3] {
-                        ui.horizontal(|ui| {
-                            ui.label(&self.trait_names[trait_idx]);
-                            egui::ComboBox::from_id_salt(format!("rule_{}", trait_idx))
-                                .selected_text(self.trait_rules[trait_idx].name())
-                                .show_ui(ui, |ui| {
-                                    for rt in RuleType::all() {
-                                        ui.selectable_value(&mut self.trait_rules[trait_idx], rt, rt.name());
+                for &trait_idx in &self.active_traits {
+                    ui.horizontal(|ui| {
+                        ui.label(&self.trait_names[trait_idx]);
+                        egui::ComboBox::from_id_salt(format!("rule_{}", trait_idx))
+                            .selected_text(self.rules_registry.get_rule_name(trait_idx))
+                            .show_ui(ui, |ui| {
+                                for &name in RulesRegistry::get_all_names() {
+                                    if let Some(rule_fn) = RulesRegistry::get_rule_by_name(name) {
+                                        let is_selected = self.rules_registry.is_stored_function(trait_idx, rule_fn);
+                                        if ui.selectable_label(is_selected, name).clicked() {
+                                            self.rules_registry.set_rule(trait_idx, rule_fn);
+                                        }
                                     }
-                                });
-                        });
-                    }
+                                }
+                            });
+                    });
                 }
             });
         });
@@ -453,10 +487,12 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt("trait_select")
                             .selected_text(&self.trait_names[self.selected_trait])
                             .show_ui(ui, |ui| {
-                                for (idx, name) in self.trait_names.iter().enumerate() {
-                                    if self.active_mask[idx / 3][idx % 3] {
-                                        ui.selectable_value(&mut self.selected_trait, idx, name);
-                                    }
+                                for &trait_idx in &self.active_traits {
+                                    ui.selectable_value(
+                                        &mut self.selected_trait, 
+                                        trait_idx, 
+                                        &self.trait_names[trait_idx]
+                                    );
                                 }
                             });
                     });
@@ -467,12 +503,24 @@ impl eframe::App for CAApp {
                             .selected_text(self.color_scheme.name())
                             .show_ui(ui, |ui| {
                                 for cs in ColorScheme::all() {
-                                    ui.selectable_value(&mut self.color_scheme, cs, cs.name());
+                                    if ui.selectable_value(&mut self.color_scheme, cs, cs.name()).changed() {
+                                        flag_update_texture = true;
+                                    }
                                 }
                             });
                     });
-                    ui.add(egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color"));
-                    ui.add(egui::Slider::new(&mut self.cell_size, 1.0..=60.0).text("Cell Size"));
+                    let base_color_changed = ui.add(
+                        egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color")
+                    ).changed();
+                    if base_color_changed {
+                        flag_update_texture = true;
+                    }
+
+                    ui.add(
+                        egui::Slider::new(&mut self.cell_size, self.min_cell_size..=self.max_cell_size)
+                            .text("Cell Size")
+                    );
+                    
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
 
@@ -481,81 +529,159 @@ impl eframe::App for CAApp {
                     egui::ScrollArea::vertical()
                         .max_height(300.0) // adjust as needed
                         .show(ui, |ui| {
-                            for mask_row in 0..3 {
-                                for mask_col in 0..3 {
-                                    if self.active_mask[mask_row][mask_col] {
-                                        let trait_idx = mask_row * 3 + mask_col;
-                                        let values = self.grid.get_trait_array(trait_idx);
-                                        let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
-                                        let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                                        let avg = values.iter().sum::<f32>() / values.len() as f32;
-
-                                        ui.label(format!("{}:", self.trait_names[trait_idx]));
-                                        ui.label(format!("  min: {:.3}, max: {:.3}", min, max));
-                                        ui.label(format!("  avg: {:.3}", avg));
-                                        ui.separator();
-                                    }
-                                }
+                            for &trait_idx in &self.active_traits {
+                                let values = self.grid.get_trait_array(trait_idx);
+                                let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
+                                let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                                let avg = values.iter().sum::<f32>() / values.len() as f32;
+                                ui.label(format!("{}:", self.trait_names[trait_idx]));
+                                ui.label(format!("  min: {:.3}, max: {:.3}", min, max));
+                                ui.label(format!("  avg: {:.3}", avg));
+                                ui.separator();
                             }
                         });
                 });
             });
 
-        
-        // Central panel: Grid visualization
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(format!("Grid - {}", self.trait_names[self.selected_trait]));
-            
-            egui::ScrollArea::both().show(ui, |ui| {
-                let values = self.grid.get_trait_array(self.selected_trait);
-                let (response, painter) = ui.allocate_painter(
-                    Vec2::new(
-                        self.grid_width as f32 * self.cell_size,
-                        self.grid_height as f32 * self.cell_size,
-                    ),
-                    egui::Sense::hover(),
+            ui.heading(format!(
+                "Grid - {}",
+                self.trait_names[self.selected_trait]
+            ));
+
+            // Update texture only when needed
+            if self.grid_texture.is_none()
+                || self.last_rendered_timestep != self.timestep
+                || flag_update_texture
+            {
+                self.update_grid_texture(ctx);
+            }
+
+            let Some(texture) = &self.grid_texture else { return };
+
+            // --------------------------------------------------
+            // Persistent scroll ID (CRITICAL)
+            // --------------------------------------------------
+            let scroll_id = ui.make_persistent_id("grid_scroll");
+
+            // --------------------------------------------------
+            // ScrollArea
+            // --------------------------------------------------
+            let mut scroll_area = egui::ScrollArea::both()
+                .id_salt(scroll_id)
+                .auto_shrink([false, false]);
+
+            if let Some(offset) = self.central_panel_offset.take() {
+                scroll_area = scroll_area.scroll_offset(offset);
+            }
+
+            let scroll_output = scroll_area.show(ui, |ui| {
+                let size = egui::vec2(
+                    self.grid_width as f32 * self.cell_size,
+                    self.grid_height as f32 * self.cell_size,
                 );
-                
-                let rect = response.rect;
-                
-                // Draw cells
-                for row in 0..self.grid_height {
-                    for col in 0..self.grid_width {
-                        let idx = row * self.grid_width + col;
-                        let value = values[idx];
-                        
-                        let x = rect.min.x + col as f32 * self.cell_size;
-                        let y = rect.min.y + row as f32 * self.cell_size;
-                        
-                        let cell_rect = Rect::from_min_size(
-                            Pos2::new(x, y),
-                            Vec2::new(self.cell_size, self.cell_size),
+
+                ui.add(
+                    egui::Image::from_texture(texture)
+                        .fit_to_exact_size(size)
+                        .sense(egui::Sense::drag()),
+                )
+            });
+
+
+            let image_response = scroll_output.inner;
+            let rect = scroll_output.inner_rect;
+            let pointer_over = ui.rect_contains_pointer(rect);
+
+            // --------------------------------------------------
+            // PAN via mouse drag
+            // --------------------------------------------------
+            if pointer_over && image_response.dragged() {
+                let delta = image_response.drag_delta();
+
+                if let Some(mut state) =
+                    egui::scroll_area::State::load(ctx, scroll_id)
+                {
+                    state.offset -= delta;
+                    state.store(ctx, scroll_id);
+                }
+
+                ctx.request_repaint();
+            }
+
+            // --------------------------------------------------
+            // PAN via wheel / trackpad (no Ctrl)
+            // --------------------------------------------------
+            let scroll = ctx.input(|i| i.raw_scroll_delta);
+
+            if pointer_over && scroll != egui::Vec2::ZERO {
+                let ctrl = ctx.input(|i| i.modifiers.ctrl);
+
+                if !ctrl {
+                    if let Some(mut state) =
+                        egui::scroll_area::State::load(ctx, scroll_id)
+                    {
+                        state.offset -= scroll;
+                        state.store(ctx, scroll_id);
+                    }
+
+                    ctx.request_repaint();
+                }
+            }
+
+            // --------------------------------------------------
+            // ZOOM via Ctrl + scroll (cursor anchored)
+            // --------------------------------------------------
+            if pointer_over {
+                let zoom_scroll = ctx.input(|i| {
+                    if i.modifiers.ctrl {
+                        i.raw_scroll_delta.y
+                    } else {
+                        0.0
+                    }
+                });
+
+                if zoom_scroll != 0.0 {
+                    let old_cell = self.cell_size;
+
+                    let zoom_factor = (1.0 + zoom_scroll * 0.001)
+                        .clamp(0.9, 1.1);
+
+                    self.cell_size = (self.cell_size * zoom_factor)
+                        .clamp(self.min_cell_size, self.max_cell_size);
+
+                    if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                        let rel = pos - rect.min;
+
+                        let state = scroll_output.state.clone();
+
+                        let old_world_pos = state.offset + rel;
+                        let zoom_ratio = self.cell_size / old_cell;
+                        let new_world_pos = old_world_pos * zoom_ratio;
+
+                        let mut new_offset = new_world_pos - rel;
+
+                        let content_size = egui::vec2(
+                            self.grid_width as f32 * self.cell_size,
+                            self.grid_height as f32 * self.cell_size,
+                        );
+                        let visible_size = rect.size();
+
+                        new_offset.x = new_offset.x.clamp(
+                            0.0,
+                            (content_size.x - visible_size.x).max(0.0),
+                        );
+                        new_offset.y = new_offset.y.clamp(
+                            0.0,
+                            (content_size.y - visible_size.y).max(0.0),
                         );
 
-                        let is_empty = self.grid.cells[row][col].is_empty();
-                        let color = self.color_scheme.map_value(value, is_empty, self.base_color_no_actor);
-                        painter.rect_filled(cell_rect, 0.0, color);
-                        painter.rect_stroke(cell_rect, 0.0, Stroke::new(0.5, Color32::GRAY));
-                        
-                        // Draw value text if enabled
-                        if self.show_values && self.cell_size > 25.0 {
-                            let text = format!("{:.2}", value);
-                            let text_color = if value > 0.5 {
-                                Color32::BLACK
-                            } else {
-                                Color32::WHITE
-                            };
-                            painter.text(
-                                cell_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                text,
-                                egui::FontId::monospace(10.0),
-                                text_color,
-                            );
-                        }
+                        self.central_panel_offset = Some(new_offset);
                     }
+
+                    ctx.request_repaint();
                 }
-            });
+            }
         });
     }
 }
