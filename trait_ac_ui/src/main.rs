@@ -1,7 +1,8 @@
 use eframe::egui;
 use egui::{Color32};
 use trait_ac::grid::Grid;
-use trait_ac::neighborhood::{Neighborhood, NeighborhoodSettings};
+use trait_ac::cell::Cell;
+use trait_ac::neighborhood::Neighborhood;
 use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
 use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
 use trait_ac::utils::{semantic_traits_names};
@@ -93,6 +94,7 @@ struct CAApp {
     grid_width: usize, // usefull if the Grid object is reset
     grid_height: usize,
     grid_density: f32,
+    next_grid_cells: Vec<Vec<Cell>>,
     
     // Simulation state
     timestep: usize,
@@ -105,8 +107,8 @@ struct CAApp {
     
     // Configuration
     active_traits: Vec<usize>,
-    neighborhood_traits_settings: NeighborhoodSettings,
-    neighborhood_mvt_settings: NeighborhoodSettings,
+    neighborhood_traits: Neighborhood,
+    neighborhood_mvt: Neighborhood,
     rules_registry: RulesRegistry,
     movement_registry: MovementRegistry,
     grid_width_min: usize,
@@ -115,6 +117,7 @@ struct CAApp {
     grid_height_max: usize,
     steps_per_second_min: f32,
     steps_per_second_max: f32,
+    rows_per_batch: usize,
     
     // Visualization
     selected_trait: usize,
@@ -140,10 +143,10 @@ impl Default for CAApp {
 
 
         let grid_width_min = 3;
-        let grid_width_max = 1000;
+        let grid_width_max = 1500;
 
         let grid_height_min = 3;
-        let grid_height_max = 1000;
+        let grid_height_max = 1500;
 
         let steps_per_second_min = 1.0;
         let steps_per_second_max = 500.0;
@@ -189,7 +192,7 @@ impl Default for CAApp {
 
 
         // Default neighborhood
-        let neighborhood_traits_settings = NeighborhoodSettings::new(
+        let neighborhood_traits = Neighborhood::new(
             neighborhood_traits_width,
             neighborhood_traits_height,
             neighborhood_traits_center_row,
@@ -197,7 +200,7 @@ impl Default for CAApp {
             neighborhood_traits_mask,
         );
 
-        let neighborhood_mvt_settings = NeighborhoodSettings::new(
+        let neighborhood_mvt = Neighborhood::new(
             neighborhood_mvt_width,
             neighborhood_mvt_height,
             neighborhood_mvt_center_row,
@@ -217,14 +220,17 @@ impl Default for CAApp {
         let rules_registry = RulesRegistry::custom(rules);
 
         let movement_function: MovementFn = Movements::static_movement; 
-        let movement_registry = MovementRegistry::custom(movement_function);
+        let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
 
+        let next_grid_cells = grid.cells.clone();
+        let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
         
         Self {
             grid,
             grid_width,
             grid_height,
             grid_density,
+            next_grid_cells,
 
             timestep: 0,
             is_playing: false,
@@ -235,8 +241,8 @@ impl Default for CAApp {
             last_rendered_timestep: 999999,
 
             active_traits,
-            neighborhood_traits_settings,
-            neighborhood_mvt_settings,
+            neighborhood_traits,
+            neighborhood_mvt,
             rules_registry,
             movement_registry,
             grid_width_min,
@@ -245,6 +251,7 @@ impl Default for CAApp {
             grid_height_max,
             steps_per_second_min,
             steps_per_second_max,
+            rows_per_batch,
             
             selected_trait: initial_selected_trait,
             cell_size,
@@ -263,44 +270,58 @@ impl Default for CAApp {
 impl CAApp {
     fn step_simulation(&mut self) {
 
-        let mut new_cells: Vec<Vec<_>> = (0..self.grid.height)
-            .into_par_iter()
-            .map(|row| {
-                let mut new_row = Vec::with_capacity(self.grid.width);
-                for col in 0..self.grid.width {
-                    let cell = &self.grid.cells[row][col];
-                    
-                    if cell.is_empty() {
-                        new_row.push(cell.clone());
-                        continue;
-                    }
-                    
-                    let mut new_cell = cell.clone();
-                    let neighborhood_traits = Neighborhood::new_from_settings(row, col, &self.neighborhood_traits_settings, &self.grid);
+        self.next_grid_cells
+            .par_chunks_mut(self.rows_per_batch)
+            .zip(self.grid.cells.par_chunks(self.rows_per_batch))
+            .for_each(|(next_rows, current_rows)| {
+                for (next_row, current_row) in next_rows.iter_mut().zip(current_rows.iter()) {
+                    for (next_cell, current_cell) in next_row.iter_mut().zip(current_row.iter()) {
+                        // Fast path for empty cells
+                        if current_cell.is_empty() {
+                            *next_cell = current_cell.clone();
+                            continue;
+                        }
 
-                    // Update only active traits
-                    for &trait_idx in &self.active_traits {
-                        let new_value = self.rules_registry.apply_rule(cell, &neighborhood_traits, trait_idx);
-                        new_cell.set_trait(trait_idx, new_value);
-                    }
+                        // Copy base state
+                        *next_cell = current_cell.clone();
 
-                    new_row.push(new_cell);
+                        // Apply active traits
+                        for &trait_idx in &self.active_traits {
+                            let new_value = self.rules_registry.apply_rule(
+                                trait_idx,
+                                current_cell,
+                                &self.neighborhood_traits,
+                                &self.grid,
+                            );
+                            next_cell.set_trait(trait_idx, new_value);
+                        }
+                    }
                 }
-                new_row
-            })
-            .collect();
+            });
 
-        self.grid.update_cells_fast(&mut new_cells);
 
-        // Step 2: Apply movement
-        let mut moved_cells = self.movement_registry.apply_movement(&self.neighborhood_mvt_settings, &self.grid);
-        self.grid.update_cells_fast(&mut moved_cells);
+        // Swap the buffers. The 'grid' now contains the calculated state.
+        // This is extremely fast (pointer swap).
+        self.grid.update_cells_fast(&mut self.next_grid_cells);
+
+
+        // Step 2: Movement (Write results into next_grid_cells)
+        self.movement_registry.apply_movement(
+            &self.neighborhood_mvt, 
+            &self.grid, 
+            &mut self.next_grid_cells, 
+        );
+        
+        // Swap grids again so 'grid' has the final state for this tick
+        self.grid.update_cells_fast(&mut self.next_grid_cells);
         
         self.timestep += 1;
     }
     
     fn reset_grid(&mut self) {
         self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density);
+        self.next_grid_cells = self.grid.cells.clone();
+        self.rows_per_batch = std::cmp::max(1, 4000 / self.grid_width);
         self.timestep = 0;
         self.time_accumulator = 0.0;
     }
@@ -454,8 +475,8 @@ impl eframe::App for CAApp {
             egui::ComboBox::from_id_salt("movement")
                 .selected_text(self.movement_registry.get_movement_name())
                 .show_ui(ui, |ui| {
-                    for &name in MovementRegistry::get_all_names() {
-                        if let Some(movement_fn) = MovementRegistry::get_movement_by_name(name) {
+                    for &name in self.movement_registry.get_all_names() {
+                        if let Some(movement_fn) = self.movement_registry.get_movement_by_name(name) {
                             let is_selected = self.movement_registry.is_stored_function(movement_fn);
                             if ui.selectable_label(is_selected, name).clicked() {
                                 self.movement_registry.set_movement_function(movement_fn);
@@ -500,8 +521,8 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt(format!("rule_{}", trait_idx))
                             .selected_text(self.rules_registry.get_rule_name(trait_idx))
                             .show_ui(ui, |ui| {
-                                for &name in RulesRegistry::get_all_names() {
-                                    if let Some(rule_fn) = RulesRegistry::get_rule_by_name(name) {
+                                for &name in self.rules_registry.get_all_names() {
+                                    if let Some(rule_fn) = self.rules_registry.get_rule_by_name(name) {
                                         let is_selected = self.rules_registry.is_stored_function(trait_idx, rule_fn);
                                         if ui.selectable_label(is_selected, name).clicked() {
                                             self.rules_registry.set_rule(trait_idx, rule_fn);

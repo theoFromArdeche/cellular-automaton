@@ -50,11 +50,23 @@ impl Grid {
         }
     }
 
+
+    #[inline(always)]
+    fn wrap(&self, val: isize, max: usize) -> usize {
+        if val < 0 {
+            (val + max as isize) as usize
+        } else if val >= max as isize {
+            (val - max as isize) as usize
+        } else {
+            val as usize
+        }
+    }
+
     /// Get a position (row, col), wrapping around (toroidal grid)
     #[inline(always)]
     pub fn get_position(&self, row: isize, col: isize) -> (usize, usize) {
-        let wrapped_row = row.rem_euclid(self.height as isize) as usize;
-        let wrapped_col = col.rem_euclid(self.width as isize) as usize;
+        let wrapped_row = self.wrap(row, self.height);
+        let wrapped_col = self.wrap(col, self.width);
         (wrapped_row, wrapped_col)
     }
 
@@ -67,9 +79,18 @@ impl Grid {
         }
     }
 
-    /// Get all cells in the grid as a flat vector
-    pub fn get_all_cells(&self) -> Vec<&Cell> {
-        self.cells.iter().flat_map(|row| row.iter()).collect()
+    #[inline(always)]
+    pub fn get_cell_value(&self, row: usize, col: usize, trait_index: usize) -> f32 {
+        unsafe {
+            self.cells.get_unchecked(row).get_unchecked(col).get_trait(trait_index)
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_cell_empty(&self, row: usize, col: usize) -> bool {
+        unsafe {
+            self.cells.get_unchecked(row).get_unchecked(col).is_empty
+        }
     }
 
     /// Update the grid with new cell states
