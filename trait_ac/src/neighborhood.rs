@@ -7,7 +7,7 @@ pub struct Neighborhood {
     pub height: usize,
     pub center_row: usize,
     pub center_col: usize,
-    pub mask: Vec<Vec<bool>>,
+    pub mask: Vec<Vec<u8>>,
 }
 
 impl Neighborhood {
@@ -16,7 +16,7 @@ impl Neighborhood {
         height: usize,
         center_row: usize,
         center_col: usize,
-        mask: Vec<Vec<bool>>,
+        mask: Vec<Vec<u8>>,
     ) -> Self {
         Self {
             width,
@@ -27,6 +27,7 @@ impl Neighborhood {
         }
     }
 
+    #[inline(always)]
     pub fn get_grid_coords(&self, mask_r: usize, mask_c: usize, cell_r: usize, cell_c: usize, grid: &Grid) -> (usize, usize) {
         let dr = mask_r as isize - self.center_row as isize;
         let dc = mask_c as isize - self.center_col as isize;
@@ -34,7 +35,8 @@ impl Neighborhood {
         grid.get_position(cell_r as isize + dr, cell_c as isize + dc)
     }
 
-    pub fn is_valid(&self, mask_r: usize, mask_c: usize) -> bool {
+    #[inline(always)]
+    pub fn is_valid(&self, mask_r: usize, mask_c: usize) -> u8 {
         unsafe {
             *self.mask.get_unchecked(mask_r).get_unchecked(mask_c)
         }
