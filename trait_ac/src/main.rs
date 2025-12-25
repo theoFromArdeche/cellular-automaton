@@ -6,31 +6,32 @@ use trait_ac::utils::{print_separator, semantic_traits_names, print_active_trait
 use std::time::Instant;
 use rayon::prelude::*;
 
-
-
 fn main() {
-    let start = Instant::now();
     println!("=== Modular Cellular Automata Simulation ===\n");
 
     // Configuration
-    let grid_height = 1500;
-    let grid_width = 1500;
+    let grid_height = 3000;
+    let grid_width = 3000;
     let grid_density = 1.0;
     let timesteps = 100;
-
-    let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
+    
+    let active_mask: [u8; 9] = [
+        1, 0, 0,
+        0, 0, 0,
+        0, 0, 0,
+    ];
 
     // Neighborhood mask
     let neighborhood_traits_mask = vec![
-        vec![true, true, true],
-        vec![true, true, true],
-        vec![true, true, true],
+        vec![1, 1, 1],
+        vec![1, 1, 1],
+        vec![1, 1, 1],
     ];
 
     let neighborhood_mvt_mask = vec![
-        vec![true, true, true],
-        vec![true, true, true],
-        vec![true, true, true],
+        vec![1, 1, 1],
+        vec![1, 1, 1],
+        vec![1, 1, 1],
     ];
 
     let neighborhood_traits_height = neighborhood_traits_mask.len();
@@ -45,7 +46,6 @@ fn main() {
 
     // Initialize grid
     let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density);
-
 
     // Default neighborhood
     let neighborhood_traits = Neighborhood::new(
@@ -69,77 +69,109 @@ fn main() {
 
     // Create custom rule set
     let rules: [RuleFn; 9] = [
-            Rules::conway, Rules::conway, Rules::conway,
-            Rules::conway, Rules::conway, Rules::conway,
-            Rules::conway, Rules::conway, Rules::conway,
+        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
+        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
+        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
     ];
     let rules_registry = RulesRegistry::custom(rules);
 
-    let movement_function: MovementFn = Movements::static_movement; 
+    let movement_function: MovementFn = Movements::static_movement;
     let mut movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
 
     println!("Configuration:");
     println!("  Grid: {}x{}", grid_width, grid_height);
     println!("  Timesteps: {}", timesteps);
+    
+    // Print active traits for info
+    let active_traits: Vec<usize> = active_mask.iter()
+        .enumerate()
+        .filter_map(|(i, &active)| if active == 1 { Some(i) } else { None })
+        .collect();
     print_active_traits(&active_traits, &trait_names, &rules_registry);
 
-    // 0. PRE-ALLOCATION (Do this before the loop)
-    // Create a secondary buffer that mirrors the grid structure perfectly.
-    // We clone once to get the memory layout, then we reuse it forever.
-    let mut next_grid_cells = grid.cells.clone();
+    // Pre-allocate next grid
+    let mut next_grid = Grid {
+        width: grid.width,
+        height: grid.height,
+        traits: grid.traits.clone(),
+        is_empty: grid.is_empty.clone(),
+    };
+
+    // OPTIMIZATION: Tune chunk size for cache efficiency
     let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
 
     // Simulation loop
+    let start = Instant::now();
     for _t in 1..=timesteps {
-        
-        // --- STEP 1: Update Traits (Double Buffering) ---
-        
-        // We iterate mutably over the 'buffer' (destination) and immutably over the 'grid' (source).
-        // usage of 'par_iter_mut' paired with 'zip' allows 1:1 mapping without allocation.
-        next_grid_cells
-            .par_chunks_mut(rows_per_batch)
-            .zip(grid.cells.par_chunks(rows_per_batch))
-            .for_each(|(next_rows, current_rows)| {
-                for (next_row, current_row) in next_rows.iter_mut().zip(current_rows.iter()) {
-                    for (next_cell, current_cell) in next_row.iter_mut().zip(current_row.iter()) {
-                        // Fast path for empty cells
-                        if current_cell.is_empty() {
-                            *next_cell = current_cell.clone();
-                            continue;
-                        }
+        let width = grid.width;
 
-                        // Copy base state
-                        *next_cell = current_cell.clone();
+        // --- OPTIMIZED TRAIT UPDATE ---
+        next_grid.traits
+            .par_chunks_mut(rows_per_batch * width)
+            .zip(next_grid.is_empty.par_chunks_mut(rows_per_batch * width))
+            .enumerate()
+            .for_each(|(chunk_idx, (next_traits_chunk, next_empty_chunk))| {
+                let start_idx = chunk_idx * rows_per_batch * width;
+                
+                for i in 0..next_traits_chunk.len() {
+                    let cell_idx = start_idx + i;
+                    
+                    // FAST PATH: Skip empty cells
+                    if grid.is_empty[cell_idx] != 0 {
+                        next_traits_chunk[i] = grid.traits[cell_idx];
+                        next_empty_chunk[i] = 1;
+                        continue;
+                    }
 
-                        // Apply active traits
-                        for &trait_idx in &active_traits {
-                            let new_value = rules_registry.apply_rule(
-                                trait_idx,
-                                current_cell,
-                                &neighborhood_traits,
-                                &grid,
-                            );
-                            next_cell.set_trait(trait_idx, new_value);
-                        }
+                    // Calculate position once
+                    let row = cell_idx / width;
+                    let col = cell_idx % width;
+
+                    // Copy base state
+                    next_traits_chunk[i] = grid.traits[cell_idx];
+                    next_empty_chunk[i] = 0;
+
+                    // OPTIMIZATION: Unroll loop manually for all 9 possible traits
+                    // The compiler can optimize away inactive branches with the const bool array
+                    // This is much faster than iterating over a Vec
+                    if active_mask[0] == 1 {
+                        next_traits_chunk[i][0] = rules_registry.apply_rule(0, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[1] == 1 {
+                        next_traits_chunk[i][1] = rules_registry.apply_rule(1, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[2] == 1 {
+                        next_traits_chunk[i][2] = rules_registry.apply_rule(2, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[3] == 1 {
+                        next_traits_chunk[i][3] = rules_registry.apply_rule(3, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[4] == 1 {
+                        next_traits_chunk[i][4] = rules_registry.apply_rule(4, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[5] == 1 {
+                        next_traits_chunk[i][5] = rules_registry.apply_rule(5, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[6] == 1 {
+                        next_traits_chunk[i][6] = rules_registry.apply_rule(6, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[7] == 1 {
+                        next_traits_chunk[i][7] = rules_registry.apply_rule(7, row, col, &neighborhood_traits, &grid);
+                    }
+                    if active_mask[8] == 1 {
+                        next_traits_chunk[i][8] = rules_registry.apply_rule(8, row, col, &neighborhood_traits, &grid);
                     }
                 }
             });
 
-
-        // Swap the buffers. The 'grid' now contains the calculated state.
-        // This is extremely fast (pointer swap).
-        grid.update_cells_fast(&mut next_grid_cells);
-
-
-        // Step 2: Movement (Write results into next_grid_cells)
+        // --- STEP 2: Movement ---
         movement_registry.apply_movement(
-            &neighborhood_mvt, 
-            &grid, 
-            &mut next_grid_cells, 
+            &neighborhood_mvt,
+            &mut grid,
+            &mut next_grid,
         );
-        
-        // Swap grids again so 'grid' has the final state for this tick
-        grid.update_cells_fast(&mut next_grid_cells);
+
+        // no need to swap the grids as the updates naturally comes to "grid" after the 2 steps
     }
 
     print_separator();

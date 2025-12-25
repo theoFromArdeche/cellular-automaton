@@ -1,13 +1,13 @@
-use crate::cell::Cell;
 use rand::Rng;
 
 
 
-/// Represents a 2D grid of cells
+/// Represents a 2D grid of cells (row-major, flat)
 pub struct Grid {
     pub width: usize,
     pub height: usize,
-    pub cells: Vec<Vec<Cell>>,
+    pub traits: Vec<[f32; 9]>,
+    pub is_empty: Vec<u8>,
 }
 
 impl Grid {
@@ -28,119 +28,143 @@ impl Grid {
     pub fn new_with_density(width: usize, height: usize, fill_percentage: f32) -> Self {
         let fill_percentage = fill_percentage.clamp(0.0, 1.0);
         let mut rng = rand::thread_rng();
-        let mut cells = Vec::with_capacity(height);
+        let len = width * height;
+
+        let mut traits = vec![[0.0; 9]; len];
+        let mut is_empty = vec![1u8; len];
 
         for row in 0..height {
-            let mut row_cells = Vec::with_capacity(width);
             for col in 0..width {
-                // Randomly decide if this cell should be filled based on percentage
+                let idx = row * width + col;
                 if rng.gen_range(0.0..=1.0) < fill_percentage {
-                    row_cells.push(Cell::random((row, col)));
-                } else {
-                    row_cells.push(Cell::empty_at((row, col)));
+                    is_empty[idx] = 0;
+                    for t in 0..9 {
+                        traits[idx][t] = rng.gen_range(0.0..=1.0);
+                    }
                 }
             }
-            cells.push(row_cells);
         }
 
         Self {
             width,
             height,
-            cells,
+            traits,
+            is_empty,
         }
     }
 
 
     #[inline(always)]
-    fn wrap(&self, val: isize, max: usize) -> usize {
-        if val < 0 {
-            (val + max as isize) as usize
-        } else if val >= max as isize {
-            (val - max as isize) as usize
+    fn idx(&self, row: usize, col: usize) -> usize {
+        row * self.width + col
+    }
+
+    #[inline(always)]
+    fn wrap(&self, v: isize, max: usize) -> usize {
+        if v < 0 {
+            (v + max as isize) as usize
+        } else if v >= max as isize {
+            (v - max as isize) as usize
         } else {
-            val as usize
+            v as usize
         }
     }
 
-    /// Get a position (row, col), wrapping around (toroidal grid)
     #[inline(always)]
     pub fn get_position(&self, row: isize, col: isize) -> (usize, usize) {
-        let wrapped_row = self.wrap(row, self.height);
-        let wrapped_col = self.wrap(col, self.width);
-        (wrapped_row, wrapped_col)
+        (
+            self.wrap(row, self.height),
+            self.wrap(col, self.width),
+        )
     }
 
-    /// Get a cell at position (row, col), wrapping around (toroidal grid)
     #[inline(always)]
-    pub fn get_cell(&self, row: isize, col: isize) -> &Cell {
-        let (wrapped_row, wrapped_col) = self.get_position(row, col);
+    pub fn is_cell_empty(&self, row: usize, col: usize) -> u8 {
         unsafe {
-            self.cells.get_unchecked(wrapped_row).get_unchecked(wrapped_col)
+            *self.is_empty.get_unchecked(self.idx(row, col))
         }
     }
 
     #[inline(always)]
-    pub fn get_cell_value(&self, row: usize, col: usize, trait_index: usize) -> f32 {
+    pub fn get_cell_trait(&self, row: usize, col: usize, trait_idx: usize) -> f32 {
         unsafe {
-            self.cells.get_unchecked(row).get_unchecked(col).get_trait(trait_index)
+            self.traits.get_unchecked(self.idx(row, col))[trait_idx]
         }
     }
 
     #[inline(always)]
-    pub fn is_cell_empty(&self, row: usize, col: usize) -> bool {
+    pub fn get_wrapped_cell_trait( &self, row: isize, col: isize, trait_idx: usize) -> f32 {
+        let (r, c) = self.get_position(row, col);
+        self.get_cell_trait(r, c, trait_idx)
+    }
+
+    #[inline(always)]
+    pub fn is_wrapped_empty(&self, row: isize, col: isize) -> u8 {
+        let (r, c) = self.get_position(row, col);
+        self.is_cell_empty(r, c)
+    }
+
+
+    #[inline(always)]
+    pub fn set_cell_trait(&mut self, row: usize, col: usize, trait_idx: usize, value: f32) {
+        let pos = self.idx(row, col);
         unsafe {
-            self.cells.get_unchecked(row).get_unchecked(col).is_empty
+            self.traits.get_unchecked_mut(pos)[trait_idx] = value;
         }
     }
 
-    /// Update the grid with new cell states
     #[inline(always)]
-    pub fn update_cells(&mut self, new_cells: Vec<Vec<Cell>>) {
-        self.cells = new_cells;
+    pub fn set_empty(&mut self, row: usize, col: usize, empty: bool) {
+        let pos = self.idx(row, col);
+        unsafe {
+            *self.is_empty.get_unchecked_mut(pos) = empty as u8;
+        }
     }
+
 
     /// Fast update that swaps the internal vector (avoids reallocation)
     #[inline(always)]
-    pub fn update_cells_fast(&mut self, new_cells: &mut Vec<Vec<Cell>>) {
-        std::mem::swap(&mut self.cells, new_cells);
+    pub fn update_grid(&mut self, new_grid: &mut Grid) {
+        std::mem::swap(&mut self.traits, &mut new_grid.traits);
+        std::mem::swap(&mut self.is_empty, &mut new_grid.is_empty);
     }
 
     /// Get trait values for all cells in row-major order
-    pub fn get_trait_array(&self, trait_index: usize) -> Vec<f32> {
-        self.cells
-            .iter()
-            .flat_map(|row| row.iter().map(|cell| cell.get_trait(trait_index)))
-            .collect()
+    #[inline]
+    pub fn get_cell_trait_array(&self, trait_index: usize) -> Vec<f32> {
+        let mut out = Vec::with_capacity(self.traits.len());
+
+        for cell_traits in &self.traits {
+            // SAFETY: trait_index is assumed valid (0..9)
+            out.push(unsafe { *cell_traits.get_unchecked(trait_index) });
+        }
+
+        out
     }
 
-    /// Randomize grid
+
+    pub fn count_filled_cells(&self) -> usize {
+        self.is_empty.iter().filter(|&&e| e == 0).count()
+    }
+
+    pub fn get_fill_percentage(&self) -> f32 {
+        let total = self.width * self.height;
+        if total == 0 {
+            0.0
+        } else {
+            self.count_filled_cells() as f32 / total as f32
+        }
+    }
+
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
-        for row in &mut self.cells {
-            for cell in row {
-                for i in 0..cell.fingerprint.len() {
-                    cell.set_trait(i, rng.gen_range(0.0..=1.0));
+        for i in 0..self.traits.len() {
+            if self.is_empty[i] == 0 {
+                for t in 0..9 {
+                    self.traits[i][t] = rng.gen_range(0.0..=1.0);
                 }
             }
         }
-    }
-
-    /// Count the number of filled (non-empty) cells
-    pub fn count_filled_cells(&self) -> usize {
-        self.cells
-            .iter()
-            .flat_map(|row| row.iter())
-            .filter(|cell| !cell.is_empty())
-            .count()
-    }
-
-    /// Get the actual fill percentage of the grid
-    pub fn get_fill_percentage(&self) -> f32 {
-        let total_cells = self.width * self.height;
-        if total_cells == 0 {
-            return 0.0;
-        }
-        self.count_filled_cells() as f32 / total_cells as f32
     }
 }
 
@@ -157,20 +181,19 @@ mod tests {
         let grid = Grid::new(5, 5);
         assert_eq!(grid.width, 5);
         assert_eq!(grid.height, 5);
-        assert_eq!(grid.cells.len(), 5);
-        assert_eq!(grid.cells[0].len(), 5);
+        assert_eq!(grid.traits.len(), 5*5);
     }
 
     #[test]
     fn test_wrapping() {
         let grid = Grid::new(5, 5);
-        let cell = grid.get_cell(-1, -1);
-        assert_eq!(cell.position, (4, 4));
+        let pos = grid.get_position(-1, -1);
+        assert_eq!(pos, (4, 4));
     }
 
     #[test]
     fn test_grid_with_density() {
-        let grid = Grid::new_with_density(100, 100, 0.5);
+        let grid = Grid::new_with_density(1000, 1000, 0.5);
         let fill_percentage = grid.get_fill_percentage();
         assert!(fill_percentage >= 0.45 && fill_percentage <= 0.55);
     }

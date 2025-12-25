@@ -1,4 +1,3 @@
-use crate::cell::Cell;
 use crate::grid::Grid;
 use crate::neighborhood::Neighborhood;
 use rayon::prelude::*;
@@ -12,12 +11,12 @@ pub struct Movements;
 impl Movements {
     /// No movement - cells stay in place
     #[inline(always)]
-    pub fn static_movement(_cell: &Cell, _neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+    pub fn static_movement(_cell_r: usize, _cell_c: usize, _neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
         (0, 0)
     }
 
     /// Random walk - move randomly to any valid position in the neighborhood mask
-    pub fn random_movement(_cell: &Cell, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+    pub fn random_movement(_cell_r: usize, _cell_c: usize, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
         let mut valid_moves = [(0isize, 0isize); 9]; // Max 9 positions in 3x3
         let mut count = 0;
         
@@ -26,7 +25,7 @@ impl Movements {
 
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
-                if neighborhood_mvt.is_valid(mask_r, mask_c) {                    
+                if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {                    
                     valid_moves[count] = (
                         mask_r as isize - center_row as isize,
                         mask_c as isize - center_col as isize
@@ -46,25 +45,24 @@ impl Movements {
     }
 
     /// Move toward the neighbor with the highest trait value (gradient ascent)
-    pub fn gradient(cell: &Cell, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
-        let current_val = cell.get_trait(0);
+    pub fn gradient(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
+        let current_val = grid.get_cell_trait(cell_r, cell_c, 0);
         let mut best_val = current_val;
         let mut best_move = (0, 0);
 
-        let (cell_r, cell_c) = cell.position;
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
 
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
-                if neighborhood_mvt.is_valid(mask_r, mask_c) &&
+                if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
                    !(mask_r == center_row && mask_c == center_col) {
 
                     let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
-                    let neighbor_value = grid.get_cell_value(grid_r, grid_c, 0);
+                    let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
                 
-                    if !neighbor_is_empty && neighbor_value > best_val {
+                    if neighbor_is_empty == 0 && neighbor_value > best_val {
                         best_val = neighbor_value;
                         best_move = (
                             mask_r as isize - center_row as isize,
@@ -79,24 +77,23 @@ impl Movements {
     }
 
     /// Move away from high-density areas (gradient descent on density)
-    pub fn avoid_crowding(cell: &Cell, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
+    pub fn avoid_crowding(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
         let mut sum = 0.0;
         let mut count = 0;
 
-        let (cell_r, cell_c) = cell.position;
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
 
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
-                if neighborhood_mvt.is_valid(mask_r, mask_c) &&
+                if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
                    !(mask_r == center_row && mask_c == center_col) {
 
                     let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
-                    let neighbor_value = grid.get_cell_value(grid_r, grid_c, 0);
+                    let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
                 
-                    if !neighbor_is_empty {
+                    if neighbor_is_empty == 0 {
                         sum += neighbor_value;
                         count += 1;
                     }
@@ -116,7 +113,7 @@ impl Movements {
             
             for mask_r in 0..neighborhood_mvt.height {
                 for mask_c in 0..neighborhood_mvt.width {
-                    if neighborhood_mvt.is_valid(mask_r, mask_c) {                    
+                    if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {                    
                         valid_moves[count] = (
                             mask_r as isize - center_row as isize,
                             mask_c as isize - center_col as isize
@@ -139,27 +136,26 @@ impl Movements {
     }
 
     /// Chemotaxis - move toward areas with specific trait combinations
-    pub fn chemotaxis(cell: &Cell, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
-        let target_trait = 2; // Looking for cooperation trait
-        let current_val = cell.get_trait(target_trait);
+    pub fn chemotaxis(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
+        let target_cell_trait = 2; // Looking for cooperation trait
+        let current_val = grid.get_cell_trait(cell_r, cell_c, target_cell_trait);
         
         let mut best_val = current_val;
         let mut best_move = (0, 0);
 
-        let (cell_r, cell_c) = cell.position;
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
 
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
-                if neighborhood_mvt.is_valid(mask_r, mask_c) &&
+                if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
                    !(mask_r == center_row && mask_c == center_col) {
 
                     let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
-                    let neighbor_value = grid.get_cell_value(grid_r, grid_c, target_trait);
+                    let neighbor_value = grid.get_cell_trait(grid_r, grid_c, target_cell_trait);
                 
-                    if !neighbor_is_empty && neighbor_value > best_val {                
+                    if neighbor_is_empty == 0 && neighbor_value > best_val {                
                         best_val = neighbor_value;
                         best_move = (
                             mask_r as isize - center_row as isize,
@@ -174,13 +170,13 @@ impl Movements {
     }
 
     /// Levy flight - occasional long-distance jumps with mostly local movement
-    pub fn levy_flight(_cell: &Cell, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
+    pub fn levy_flight(_cell_r: usize, _cell_c: usize, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
         let mut rng = rand::thread_rng();
         
         // 90% local movement, 10% long jump
         if rng.gen_bool(0.9) {
             // Local movement
-            Movements::random_movement(_cell, neighborhood_mvt, _grid)
+            Movements::random_movement(_cell_r, _cell_c, neighborhood_mvt, _grid)
         } else {
             // Long jump - use full neighborhood extent
             let mut valid_moves = [(0isize, 0isize); 9];
@@ -191,7 +187,7 @@ impl Movements {
             
             for mask_r in 0..neighborhood_mvt.height {
                 for mask_c in 0..neighborhood_mvt.width {
-                    if neighborhood_mvt.is_valid(mask_r, mask_c) {
+                    if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {
                         valid_moves[count] = (
                             mask_r as isize - center_row as isize,
                             mask_c as isize - center_col as isize,
@@ -211,10 +207,10 @@ impl Movements {
     }
 
     /// Multi-trait based movement - considers multiple traits for decision
-    pub fn multi_trait(cell: &Cell, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
-        let energy = cell.get_trait(0);
-        let mobility = cell.get_trait(5);
-        let aggression = cell.get_trait(3);
+    pub fn multi_trait(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
+        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
+        let mobility = grid.get_cell_trait(cell_r, cell_c, 5);
+        let aggression = grid.get_cell_trait(cell_r, cell_c, 3);
         
         // High mobility = more likely to move
         let mut rng = rand::thread_rng();
@@ -224,17 +220,17 @@ impl Movements {
         
         // High energy + high aggression = seek highest value neighbor
         if energy > 0.6 && aggression > 0.6 {
-            return Movements::gradient(cell, neighborhood_mvt, _grid);
+            return Movements::gradient(cell_r, cell_c, neighborhood_mvt, grid);
         }
         
         // Low energy = avoid crowding
         if energy < 0.3 {
-            return Movements::avoid_crowding(cell, neighborhood_mvt, _grid);
+            return Movements::avoid_crowding(cell_r, cell_c, neighborhood_mvt, grid);
         }
         
         // Default: weighted random based on mobility
         if rng.gen_bool(mobility as f64) {
-            Movements::random_movement(cell, neighborhood_mvt, _grid)
+            Movements::random_movement(cell_r, cell_c, neighborhood_mvt, grid)
         } else {
             (0, 0)
         }
@@ -253,7 +249,7 @@ enum ResolveState {
     Resolved(bool),
 }
 
-pub type MovementFn = fn(&Cell, &Neighborhood, &Grid) -> (isize, isize);
+pub type MovementFn = fn(usize, usize, &Neighborhood, &Grid) -> (isize, isize);
 
 pub struct MovementRegistry {
     pub movement_function: MovementFn,
@@ -325,10 +321,6 @@ impl MovementRegistry {
             // Reset values efficiently
             // Parallel reset is faster for large arrays
             self.claims.par_iter().for_each(|x| x.store(0, Ordering::Relaxed));
-            
-            // We don't strictly need to reset intentions/states/reserved here 
-            // because we overwrite them during the logic, but resetting states is good practice
-            // if logic depends on "Unvisited" initial state.
             self.reserved.par_iter_mut().for_each(|x| *x = None);
             self.states.par_iter_mut().for_each(|x| *x = ResolveState::Unvisited);
         }
@@ -378,125 +370,112 @@ impl MovementRegistry {
 
     pub fn apply_movement(&mut self,
                           neighborhood_mvt: &Neighborhood,
-                          grid: &Grid,
-                          next_grid: &mut Vec<Vec<Cell>>, // Double Buffer Target
+                          next_grid: &mut Grid, // normal Grid
+                          grid: &mut Grid, // temp next_grid from previous step (apply rule)
                           ) {
+
+        if self.get_movement_name() == self.get_name_for_movement(Movements::static_movement) {
+            // Swap buffers
+            next_grid.update_grid(grid);
+            return;
+        }
 
         let height = grid.height;
         let width = grid.width;
+        let len = width * height;
 
-        // 0. Reset Workspace (Zero allocation)
+        // 0. Reset workspace
         self.prepare(width, height);
 
-        // 1. Batch Size Calculation
-        // We want enough work to offset thread startup costs. 
-        // ~4000-8000 cells per batch is usually a sweet spot for simple logic.
-        let rows_per_batch = std::cmp::max(1, 4000 / width); 
-        let chunk_len = width * rows_per_batch;
+        // Batch sizing
+        let rows_per_batch = std::cmp::max(1, 4000 / width);
+        let chunk_len = rows_per_batch * width;
 
-        // --- Phase 1: Parallel Bidding (Batched) ---
+        // --- Phase 1: Parallel Bidding ---
         self.intentions
             .par_chunks_mut(chunk_len)
-            .zip(grid.cells.par_chunks(rows_per_batch)) // Note: grid.cells is Vec<Vec>, so this chunks rows
+            .zip(grid.is_empty.par_chunks(chunk_len))
             .enumerate()
-            .for_each(|(batch_idx, (intention_slab, grid_row_slab))| {
+            .for_each(|(batch_idx, (intent_chunk, empty_chunk))| {
                 let mut rng = rand::thread_rng();
-                let start_r = batch_idx * rows_per_batch;
+                let start_idx = batch_idx * chunk_len;
 
-                // Iterate through the rows in this batch
-                for (local_r, row_cells) in grid_row_slab.iter().enumerate() {
-                    let r = start_r + local_r;
-                    
-                    // Get the slice of the intention slab corresponding to this row
-                    let intention_row = &mut intention_slab[local_r * width .. (local_r + 1) * width];
+                for i in 0..intent_chunk.len() {
+                    let global_idx = start_idx + i;
+                    if global_idx >= len {
+                        break;
+                    }
 
-                    for (c, cell) in row_cells.iter().enumerate() {
-                        // Default: Stay put
-                        intention_row[c] = (r as u16, c as u16);
+                    let r = global_idx / width;
+                    let c = global_idx % width;
 
-                        if cell.is_empty() { continue; }
+                    // Default: stay
+                    intent_chunk[i] = (r as u16, c as u16);
 
-                        // 1. Calculate Move logic
-                        let (dr, dc) = (self.movement_function)(cell, &neighborhood_mvt, grid);
+                    if empty_chunk[i] != 0 {
+                        continue;
+                    }
 
-                        let target_dr = (neighborhood_mvt.center_row as isize + dr) as usize;
-                        let target_dc = (neighborhood_mvt.center_col as isize + dc) as usize;
-                        
-                        let is_valid_move = if target_dr < neighborhood_mvt.height && target_dc < neighborhood_mvt.width {
-                            unsafe { *neighborhood_mvt.mask.get_unchecked(target_dr).get_unchecked(target_dc) }
-                        } else {
-                            false
-                        };
+                    // Movement logic (row/col-based)
+                    let (dr, dc) = (self.movement_function)(r, c, neighborhood_mvt, grid);
 
-                        let (tr, tc) = if is_valid_move {
-                            (
-                                ((r as isize + dr).clamp(0, height as isize - 1)) as usize,
-                                ((c as isize + dc).clamp(0, width as isize - 1)) as usize
-                            )
-                        } else { (r, c) };
+                    let (tr, tc) = (
+                        ((r as isize + dr).clamp(0, height as isize - 1)) as usize,
+                        ((c as isize + dc).clamp(0, width as isize - 1)) as usize,
+                    );
 
-                        // 2. Bid
-                        if (tr, tc) != (r, c) {
-                            let target_flat = tr * width + tc;
-                            let source_flat = r * width + c;
-                            
-                            let priority: u32 = rng.next_u32();
-                            // Priority | Source Index
-                            let bid = ((priority as u64) << 32) | (source_flat as u64);
+                    if (tr, tc) != (r, c) {
+                        let target_flat = tr * width + tc;
+                        let priority: u32 = rng.next_u32();
+                        let bid = ((priority as u64) << 32) | (global_idx as u64);
 
-                            // We can use relaxed ordering safely here
-                            unsafe {
-                                self.claims.get_unchecked(target_flat).fetch_max(bid, Ordering::Relaxed);
-                            }
-                            
-                            intention_row[c] = (tr as u16, tc as u16);
+                        unsafe {
+                            self.claims
+                                .get_unchecked(target_flat)
+                                .fetch_max(bid, Ordering::Relaxed);
                         }
+
+                        intent_chunk[i] = (tr as u16, tc as u16);
                     }
                 }
             });
-        
 
-        // --- Phase 2: Pruning (Also Batched) ---
-        // Verify winners. If we lost, reset intention to (r,c)
-        // We can use a larger chunk size here because the logic is simpler (just checking atomic)
-        let prune_chunk_size = width * 50; 
+        // --- Phase 2: Pruning ---
+        let prune_chunk_size = width * 50;
         self.intentions
             .par_chunks_mut(prune_chunk_size)
             .enumerate()
             .for_each(|(chunk_id, chunk)| {
-                let chunk_start_idx = chunk_id * prune_chunk_size;
-                
-                for (i, target) in chunk.iter_mut().enumerate() {
-                    let (tr, tc) = (target.0 as usize, target.1 as usize);
-                    let current_flat = chunk_start_idx + i;
-                    let r = current_flat / width;
-                    let c = current_flat % width;
+                let base_idx = chunk_id * prune_chunk_size;
 
-                    if (tr, tc) == (r, c) { continue; }
+                for i in 0..chunk.len() {
+                    let global_idx = base_idx + i;
+                    let (tr, tc) = chunk[i];
+                    let r = global_idx / width;
+                    let c = global_idx % width;
 
-                    let target_flat = tr * width + tc;
-                    
-                    // Relaxed Load
-                    let winning_bid = unsafe { self.claims.get_unchecked(target_flat).load(Ordering::Relaxed) };
+                    if (tr as usize, tc as usize) == (r, c) {
+                        continue;
+                    }
+
+                    let target_flat = tr as usize * width + tc as usize;
+                    let winning_bid = unsafe {
+                        self.claims
+                            .get_unchecked(target_flat)
+                            .load(Ordering::Relaxed)
+                    };
                     let winner_idx = (winning_bid & 0xFFFFFFFF) as usize;
 
-                    if winner_idx != current_flat {
-                        *target = (r as u16, c as u16);
+                    if winner_idx != global_idx {
+                        chunk[i] = (r as u16, c as u16);
                     }
                 }
             });
 
-
-        // --- Phase 3: Resolve (Sequential DFS) ---
-        // Using flat buffers significantly improves cache hits here compared to Vec<Vec>
-        // Initialize empty states
-        for r in 0..height {
-            for c in 0..width {
-                let idx = r * width + c;
-                // Unsafe access is safe here due to bounds, but standard indexing is likely optimized out
-                if grid.cells[r][c].is_empty() {
-                    self.states[idx] = ResolveState::Empty;
-                }
+        // --- Phase 3: Resolve (DFS) ---
+        for idx in 0..len {
+            if grid.is_empty[idx] != 0 {
+                self.states[idx] = ResolveState::Empty;
             }
         }
 
@@ -509,86 +488,78 @@ impl MovementRegistry {
             }
         }
 
-        // --- Phase 4: Construct Grid into Buffer (Parallel) ---
-        // Write directly into `next_grid`. No allocation.
-        next_grid.par_iter_mut().enumerate().for_each(|(r, row_cells)| {
-            for (c, target_cell) in row_cells.iter_mut().enumerate() {
-                let idx = r * width + c;
-                
-                // Current cell in the old grid
-                let old_cell = &grid.cells[r][c];
+        // --- Phase 4: Construct next grid ---
+        next_grid
+            .traits
+            .par_iter_mut()
+            .zip(next_grid.is_empty.par_iter_mut())
+            .enumerate()
+            .for_each(|(idx, (out_traits, out_empty))| {
+                let _r = idx / width;
+                let _c = idx % width;
 
-                if old_cell.is_empty() {
-                    // Did someone move here?
+                if grid.is_empty[idx] != 0 {
                     match self.reserved[idx] {
                         Some((sr, sc)) => {
-                            *target_cell = grid.cells[sr as usize][sc as usize].clone();
-                            target_cell.position = (r, c);
-                        },
+                            let src_idx = sr as usize * width + sc as usize;
+                            *out_traits = grid.traits[src_idx];
+                            *out_empty = 0;
+                        }
                         None => {
-                            // Ensure it stays empty (might contain garbage from previous turn)
-                            if !target_cell.is_empty() {
-                                *target_cell = Cell::empty_at((r, c));
-                            }
+                            *out_empty = 1;
                         }
                     }
-                    continue;
+                    return;
                 }
 
                 match self.states[idx] {
-                    ResolveState::Resolved(true) => {
-                        // We moved away. Who fills our spot?
-                        match self.reserved[idx] {
-                            Some((sr, sc)) => {
-                                *target_cell = grid.cells[sr as usize][sc as usize].clone();
-                                target_cell.position = (r, c);
-                            },
-                            None => {
-                                *target_cell = Cell::empty_at((r, c));
-                            }
+                    ResolveState::Resolved(true) => match self.reserved[idx] {
+                        Some((sr, sc)) => {
+                            let src_idx = sr as usize * width + sc as usize;
+                            *out_traits = grid.traits[src_idx];
+                            *out_empty = 0;
+                        }
+                        None => {
+                            *out_empty = 1;
                         }
                     },
                     _ => {
-                        // We stayed put.
-                        *target_cell = old_cell.clone();
+                        *out_traits = grid.traits[idx];
+                        *out_empty = 0;
                     }
                 }
-            }
-        });
+            });
     }
 
+
     // Optimized DFS for flat buffers
-    pub fn resolve_move(
-        &mut self,
-        r: usize, c: usize, w: usize,
-    ) -> bool {
+    pub fn resolve_move(&mut self, r: usize, c: usize, w: usize) -> bool {
         let idx = r * w + c;
-        
-        // Manual state check to avoid function call overhead
+
         match self.states[idx] {
             ResolveState::Resolved(res) => return res,
-            ResolveState::Visiting => return true, // Cycle detected, assume valid (or handle cycle logic)
+            ResolveState::Visiting => return true,
             _ => {}
         }
 
         self.states[idx] = ResolveState::Visiting;
 
         let (tr_u16, tc_u16) = self.intentions[idx];
-        let (tr, tc) = (tr_u16 as usize, tc_u16 as usize);
+        let tr = tr_u16 as usize;
+        let tc = tc_u16 as usize;
         let target_idx = tr * w + tc;
 
-        // Self-move or blocked logic
         if target_idx == idx {
-            self.reserved[target_idx] = Some((r as u16, c as u16));
+            self.reserved[idx] = Some((r as u16, c as u16));
             self.states[idx] = ResolveState::Resolved(true);
             return true;
-        } 
-        
+        }
+
         if self.reserved[target_idx].is_some() {
             self.states[idx] = ResolveState::Resolved(false);
             return false;
-        } 
-        
+        }
+
         self.reserved[target_idx] = Some((r as u16, c as u16));
 
         if self.states[target_idx] == ResolveState::Empty {
@@ -596,20 +567,15 @@ impl MovementRegistry {
             return true;
         }
 
-        // Recursion
         let occupant_can_move = self.resolve_move(tr, tc, w);
-        
-        // Check if occupant actually vacates
-        let (occ_tr, occ_tc) = self.intentions[target_idx];
-        let occupant_vacating = occupant_can_move && ((occ_tr as usize * w + occ_tc as usize) != target_idx);
 
-        if occupant_vacating {
-            self.states[idx] = ResolveState::Resolved(true);
-            true
-        } else {
-            self.states[idx] = ResolveState::Resolved(false);
-            false
-        }
+        let (occ_tr, occ_tc) = self.intentions[target_idx];
+        let occupant_vacating =
+            occupant_can_move && (occ_tr as usize * w + occ_tc as usize != target_idx);
+
+        let result = occupant_vacating;
+        self.states[idx] = ResolveState::Resolved(result);
+        result
     }
 }
 
@@ -628,7 +594,7 @@ mod tests {
         for r in 0..3 {
             for c in 0..3 {
                 for index in 0..9 {
-                    grid.cells[r][c].set_trait(index, 0.5);
+                    grid.cells[r][c].set_cell_trait(index, 0.5);
                 }
             }
         }
@@ -671,7 +637,7 @@ mod tests {
     fn test_gradient_moves_toward_highest_trait() {
         let mut grid = build_test_grid();
         // Set a neighbor with higher trait
-        grid.cells[0][1].set_trait(0, 0.9);
+        grid.cells[0][1].set_cell_trait(0, 0.9);
         let mask = vec![
             vec![true, true, true],
             vec![true, true, true],
@@ -698,9 +664,9 @@ mod tests {
     }
 
     #[test]
-    fn test_chemotaxis_moves_toward_target_trait() {
+    fn test_chemotaxis_moves_toward_target_cell_trait() {
         let mut grid = build_test_grid();
-        grid.cells[0][0].set_trait(2, 1.0); // Cooperation trait
+        grid.cells[0][0].set_cell_trait(2, 1.0); // Cooperation trait
         let mask = vec![
             vec![true, true, true],
             vec![true, true, true],
