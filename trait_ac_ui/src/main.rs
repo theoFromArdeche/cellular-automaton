@@ -1,4 +1,4 @@
-use eframe::egui;
+use eframe::{egui, glow};
 use egui::{Color32};
 use trait_ac::grid::Grid;
 use trait_ac::neighborhood::Neighborhood;
@@ -7,6 +7,8 @@ use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
 use trait_ac::utils::{semantic_traits_names, print_separator, print_active_traits};
 use rayon::prelude::*;
 use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use eframe::glow::HasContext;
 
 
 
@@ -14,14 +16,18 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
-            .with_title("Cellular Automata Simulator"),
+            .with_title("Cellular Automata Simulator - GPU Accelerated"),
+        renderer: eframe::Renderer::Glow,  // ← IMPORTANT!
         ..Default::default()
     };
     
     eframe::run_native(
         "CA Simulator",
         options,
-        Box::new(|_cc| Ok(Box::new(CAApp::default()))),
+        Box::new(|cc| {
+            let gl = cc.gl.as_ref().expect("Failed to get glow context").clone();
+            Ok(Box::new(CAApp::new(gl)))  // ← Pass GL context
+        }),
     )
 }
 
@@ -46,7 +52,16 @@ impl ColorScheme {
             Self::RedBlue => "Red-Blue",
         }
     }
-    
+
+    fn to_index(&self) -> usize {
+        match self {
+            Self::Viridis => 0,
+            Self::Plasma => 1,
+            Self::Grayscale => 2,
+            Self::RedBlue => 3,
+        }
+    }
+
     fn map_value(&self, value: f32, is_empty: bool, base_color_no_actor: f32) -> Color32 {
         let v;
         if !is_empty {
@@ -84,6 +99,170 @@ impl ColorScheme {
     }
 }
 
+// GPU Renderer - Embedded in main.rs for simplicity
+struct GPURenderer {
+    gl: Arc<glow::Context>,
+    texture: glow::Texture,
+    programs: [glow::Program; 4],
+    vao: glow::VertexArray,
+    vbo: glow::Buffer,
+}
+
+impl GPURenderer {
+    fn new(gl: Arc<glow::Context>) -> Result<Self, String> {
+        unsafe {
+            let vertex_shader_src = include_str!("shaders/vertex.glsl");
+            let fragment_shaders = [
+                include_str!("shaders/viridis.glsl"),
+                include_str!("shaders/plasma.glsl"),
+                include_str!("shaders/grayscale.glsl"),
+                include_str!("shaders/redblue.glsl"),
+            ];
+            
+            let mut programs = [None, None, None, None];
+            for i in 0..4 {
+                programs[i] = Some(Self::create_program(&gl, vertex_shader_src, fragment_shaders[i])?);
+            }
+            
+            let texture = gl.create_texture()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+            
+            let vao = gl.create_vertex_array()?;
+            let vbo = gl.create_buffer()?;
+            
+            Ok(Self {
+                gl,
+                texture,
+                programs: [programs[0].unwrap(), programs[1].unwrap(), programs[2].unwrap(), programs[3].unwrap()],
+                vao,
+                vbo,
+            })
+        }
+    }
+    
+    unsafe fn create_program(gl: &glow::Context, vs: &str, fs: &str) -> Result<glow::Program, String> {
+        let program = unsafe { gl.create_program()? };
+        let v = unsafe { gl.create_shader(glow::VERTEX_SHADER)? };
+        unsafe { gl.shader_source(v, vs) };
+        unsafe { gl.compile_shader(v) } ;
+        if unsafe { !gl.get_shader_compile_status(v) } {
+            return Err(unsafe { gl.get_shader_info_log(v) });
+        }
+        
+        let f = unsafe { gl.create_shader(glow::FRAGMENT_SHADER)? };
+        unsafe { gl.shader_source(f, fs) };
+        unsafe { gl.compile_shader(f) };
+        if unsafe { !gl.get_shader_compile_status(f) } {
+            return Err(unsafe { gl.get_shader_info_log(f) });
+        }
+        
+        unsafe { gl.attach_shader(program, v) };
+        unsafe { gl.attach_shader(program, f) };
+        unsafe { gl.link_program(program) };
+        
+        if unsafe {!gl.get_program_link_status(program)} {
+            return Err(unsafe { gl.get_program_info_log(program) });
+        }
+        
+        unsafe { gl.delete_shader(v); }
+        unsafe { gl.delete_shader(f); }
+        Ok(program)
+    }
+    
+    fn update_texture(&mut self, width: usize, height: usize, data: &[u8], resize_flag: bool) {
+        unsafe {
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            
+            // Only reallocate if dimensions change
+            if resize_flag {
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D, 0, glow::R8 as i32,
+                    width as i32, height as i32, 0,
+                    glow::RED, glow::UNSIGNED_BYTE, eframe::glow::PixelUnpackData::Slice(None), // Allocate only
+                );
+            }
+
+            // Fast update
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D, 0, 
+                0, 0, // x, y offset
+                width as i32, height as i32,
+                glow::RED, glow::UNSIGNED_BYTE,
+                eframe::glow::PixelUnpackData::Slice(Some(data)),
+            );
+        }
+    }
+    
+    fn paint(&self, scheme: usize, base: f32, rect: egui::Rect, _screen: [f32; 2], 
+            scroll_offset: egui::Vec2, content_size: egui::Vec2) {
+        unsafe {
+            let gl = &self.gl;
+            let prog = self.programs[scheme];
+            gl.use_program(Some(prog));
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            gl.uniform_1_i32(gl.get_uniform_location(prog, "u_texture").as_ref(), 0);
+            gl.uniform_1_f32(gl.get_uniform_location(prog, "u_base_color").as_ref(), base);
+            
+            let rect_size = rect.size();
+            gl.uniform_2_f32(
+                gl.get_uniform_location(prog, "u_rect_size").as_ref(),
+                rect_size.x,
+                rect_size.y,
+            );
+            
+            let rect_min = rect.min;
+            gl.uniform_2_f32(
+                gl.get_uniform_location(prog, "u_rect_min").as_ref(),
+                rect_min.x,
+                rect_min.y,
+            );
+            
+            // Calculate what portion of the texture is visible
+            // Clamp to [0, 1] range to avoid repeating
+            let tex_min_x = (scroll_offset.x / content_size.x).max(0.0).min(1.0);
+            let tex_min_y = (scroll_offset.y / content_size.y).max(0.0).min(1.0);
+            let tex_max_x = ((scroll_offset.x + rect_size.x) / content_size.x).max(0.0).min(1.0);
+            let tex_max_y = ((scroll_offset.y + rect_size.y) / content_size.y).max(0.0).min(1.0);
+            
+            // Calculate how much of the viewport actually contains texture
+            let visible_content_width = (content_size.x - scroll_offset.x).max(0.0).min(rect_size.x);
+            let visible_content_height = (content_size.y - scroll_offset.y).max(0.0).min(rect_size.y);
+            
+            // Only render where there's actual content
+            let render_max_x = rect.min.x + visible_content_width;
+            let render_max_y = rect.min.y + visible_content_height;
+            
+            let verts: [f32; 24] = [
+                rect.min.x, rect.min.y, tex_min_x, tex_min_y,
+                render_max_x, rect.min.y, tex_max_x, tex_min_y,
+                render_max_x, render_max_y, tex_max_x, tex_max_y,
+                rect.min.x, rect.min.y, tex_min_x, tex_min_y,
+                render_max_x, render_max_y, tex_max_x, tex_max_y,
+                rect.min.x, render_max_y, tex_min_x, tex_max_y,
+            ];
+            
+            gl.bind_vertex_array(Some(self.vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&verts), glow::STREAM_DRAW);
+            
+            let pos = gl.get_attrib_location(prog, "a_pos").unwrap();
+            let tc = gl.get_attrib_location(prog, "a_tc").unwrap();
+            
+            gl.enable_vertex_attrib_array(pos);
+            gl.vertex_attrib_pointer_f32(pos, 2, glow::FLOAT, false, 16, 0);
+            gl.enable_vertex_attrib_array(tc);
+            gl.vertex_attrib_pointer_f32(tc, 2, glow::FLOAT, false, 16, 8);
+            
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+            gl.bind_vertex_array(None);
+            gl.use_program(None);
+        }
+    }
+}
+
 
 
 
@@ -104,8 +283,8 @@ struct CAApp {
     is_playing: bool,
     steps_per_second: f32,
     time_accumulator: f32,
-    grid_texture: Option<egui::TextureHandle>,
-    pixels: Vec<egui::Color32>,
+    gpu_renderer: Arc<Mutex<Option<GPURenderer>>>,
+    grayscale_buffer: Vec<u8>,
     central_panel_offset: Option<egui::Vec2>,
     last_rendered_timestep: usize,
     
@@ -137,12 +316,23 @@ struct CAApp {
     trait_names: [String; 9],
 }
 
-impl Default for CAApp {
-    fn default() -> Self {
+impl CAApp {
+    fn new(gl: Arc<glow::Context>) -> Self {
+        let renderer = match GPURenderer::new(gl) {
+            Ok(r) => {
+                println!("✓ GPU renderer initialized");
+                Some(r)
+            }
+            Err(e) => {
+                eprintln!("✗ GPU init failed: {}", e);
+                None
+            }
+        };
+
         // Configuration
         let grid_width = 3000;
         let grid_height = 3000;
-        let steps_per_second = 25.0;
+        let steps_per_second = 100.0;
         let grid_density = 1.0;
 
         let timed_simulation = false;
@@ -165,7 +355,7 @@ impl Default for CAApp {
         let show_values_minimum_cell_size = 20.0;
 
         let color_scheme = ColorScheme::Viridis;
-        let base_color_no_actor = 0.1;
+        let base_color_no_actor = 0.0;
 
         let active_mask: [u8; 9] = [
             1, 0, 0,
@@ -256,8 +446,8 @@ impl Default for CAApp {
             is_playing: timed_simulation,
             steps_per_second,
             time_accumulator: 0.0,
-            grid_texture: None,
-            pixels: vec![egui::Color32::BLACK; grid_width * grid_height],
+            gpu_renderer: Arc::new(Mutex::new(renderer)),
+            grayscale_buffer: Vec::new(),
             central_panel_offset: None,
             last_rendered_timestep: 999999,
 
@@ -286,9 +476,7 @@ impl Default for CAApp {
             trait_names,
         }
     }
-}
 
-impl CAApp {
     fn step_simulation(&mut self) {
         if self.timestep == 0 {
             self.start = Instant::now();
@@ -296,61 +484,59 @@ impl CAApp {
         let width = self.grid.width;
 
         // --- OPTIMIZED TRAIT UPDATE ---
+        // Process each trait vector in parallel
         self.next_grid.traits
-            .par_chunks_mut(self.rows_per_batch * width)
-            .zip(self.next_grid.is_empty.par_chunks_mut(self.rows_per_batch * width))
+            .par_iter_mut()
+            .zip(self.grid.traits.par_iter())
             .enumerate()
-            .for_each(|(chunk_idx, (next_traits_chunk, next_empty_chunk))| {
+            .for_each(|(trait_idx, (next_trait_vec, current_trait_vec))| {
+                // Skip inactive traits entirely
+                if self.active_mask[trait_idx] == 0 {
+                    next_trait_vec.copy_from_slice(current_trait_vec);
+                    return;
+                }
+
+                // Process this trait for all cells
+                next_trait_vec
+                    .par_chunks_mut(self.rows_per_batch * width)
+                    .enumerate()
+                    .for_each(|(chunk_idx, next_trait_chunk)| {
+                        let start_idx = chunk_idx * self.rows_per_batch * width;
+                        
+                        for i in 0..next_trait_chunk.len() {
+                            let cell_idx = start_idx + i;
+                            
+                            // FAST PATH: Skip empty cells
+                            if self.grid.is_empty[cell_idx] != 0 {
+                                next_trait_chunk[i] = current_trait_vec[cell_idx];
+                                continue;
+                            }
+                            
+                            // Calculate position
+                            let row = cell_idx / width;
+                            let col = cell_idx % width;
+                            
+                            // Apply rule only for this trait
+                            next_trait_chunk[i] = self.rules_registry.apply_rule(
+                                trait_idx, 
+                                row, 
+                                col, 
+                                &self.neighborhood_traits, 
+                                &self.grid
+                            );
+                        }
+                    });
+            });
+
+        // Update is_empty separately (only once, not per trait)
+        self.next_grid.is_empty
+            .par_chunks_mut(self.rows_per_batch * width)
+            .enumerate()
+            .for_each(|(chunk_idx, next_empty_chunk)| {
                 let start_idx = chunk_idx * self.rows_per_batch * width;
-                
-                for i in 0..next_traits_chunk.len() {
+                for i in 0..next_empty_chunk.len() {
                     let cell_idx = start_idx + i;
-                    
-                    // FAST PATH: Skip empty cells
-                    if self.grid.is_empty[cell_idx] != 0 {
-                        next_traits_chunk[i] = self.grid.traits[cell_idx];
-                        next_empty_chunk[i] = 1;
-                        continue;
-                    }
-
-                    // Calculate position once
-                    let row = cell_idx / width;
-                    let col = cell_idx % width;
-
-                    // Copy base state
-                    next_traits_chunk[i] = self.grid.traits[cell_idx];
-                    next_empty_chunk[i] = 0;
-
-                    // OPTIMIZATION: Unroll loop manually for all 9 possible traits
-                    // The compiler can optimize away inactive branches with the const bool array
-                    // This is much faster than iterating over a Vec
-                    if self.active_mask[0] == 1 {
-                        next_traits_chunk[i][0] = self.rules_registry.apply_rule(0, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[1] == 1 {
-                        next_traits_chunk[i][1] = self.rules_registry.apply_rule(1, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[2] == 1 {
-                        next_traits_chunk[i][2] = self.rules_registry.apply_rule(2, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[3] == 1 {
-                        next_traits_chunk[i][3] = self.rules_registry.apply_rule(3, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[4] == 1 {
-                        next_traits_chunk[i][4] = self.rules_registry.apply_rule(4, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[5] == 1 {
-                        next_traits_chunk[i][5] = self.rules_registry.apply_rule(5, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[6] == 1 {
-                        next_traits_chunk[i][6] = self.rules_registry.apply_rule(6, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[7] == 1 {
-                        next_traits_chunk[i][7] = self.rules_registry.apply_rule(7, row, col, &self.neighborhood_traits, &self.grid);
-                    }
-                    if self.active_mask[8] == 1 {
-                        next_traits_chunk[i][8] = self.rules_registry.apply_rule(8, row, col, &self.neighborhood_traits, &self.grid);
-                    }
+                    next_empty_chunk[i] = self.grid.is_empty[cell_idx];
                 }
             });
 
@@ -382,55 +568,51 @@ impl CAApp {
         self.timestep = 0;
     }
 
-    fn update_grid_texture(&mut self, ctx: &egui::Context) {
-        // --- Ensure selected trait is active ---
+    fn update_grayscale_buffer(&mut self) {
         if self.active_mask[self.selected_trait] == 0 {
             if let Some(i) = (0..9).find(|&i| self.active_mask[i] == 1) {
                 self.selected_trait = i;
             } else {
-                return; // No active traits
+                return;
             }
         }
-
-        let width = self.grid_width;
-        let height = self.grid_height;
-        let required_len = width * height;
-
-        if self.pixels.len() != required_len {
-            self.pixels.resize(required_len, egui::Color32::BLACK);
+        
+        let len = self.grid_width * self.grid_height;
+        let resize_flag = self.grayscale_buffer.len() != len;
+        if  resize_flag {
+            self.grayscale_buffer.resize(len, 0);
         }
-
-        // Fill pixel buffer
-        self.pixels
-            .par_chunks_mut(width)
+        
+        self.grayscale_buffer
+            .par_chunks_mut(self.grid_width)
             .enumerate()
-            .for_each(|(row, row_pixels)| {
-                for col in 0..width {
-                    let idx = row * width + col;
-                    let trait_value = self.grid.traits[idx][self.selected_trait];
-                    let is_empty = self.grid.is_empty[idx] != 0;
+            .for_each(|(row, pixels)| {
+                let start = row * self.grid_width;
+                // The compiler can now auto-vectorize this loop (process 8 or 16 pixels at once)
+                for (col, pixel) in pixels.iter_mut().enumerate() {
+                    let idx = start + col;
                     
-                    row_pixels[col] = self.color_scheme.map_value(
-                        trait_value,
-                        is_empty,
-                        self.base_color_no_actor,
-                    );
+                    // Assume is_empty is 1 for empty, 0 for full.
+                    // If is_empty is 0, mask becomes 1. If is_empty is 1, mask becomes 0.
+                    // Note: Adjust logic based on your actual data types (bool vs u8)
+                    let is_not_empty = (self.grid.is_empty[idx] == 0) as u8;
+                    let trait_val = self.grid.traits[self.selected_trait][idx];
+                    let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
+
+                    // Multiply by mask. 
+                    *pixel = offset_val * is_not_empty;
                 }
             });
-
-        let image = egui::ColorImage {
-            size: [width, height],
-            pixels: self.pixels.clone(),
-        };
-
-        match &mut self.grid_texture {
-            Some(texture) => texture.set(image, egui::TextureOptions::NEAREST),
-            None => {
-                self.grid_texture = Some(ctx.load_texture(
-                    "grid_tex",
-                    image,
-                    egui::TextureOptions::NEAREST,
-                ));
+        
+        // Upload to GPU
+        if let Ok(mut guard) = self.gpu_renderer.lock() {
+            if let Some(ref mut r) = *guard {
+                r.update_texture(
+                    self.grid_width,
+                    self.grid_height,
+                    &self.grayscale_buffer,
+                    resize_flag,
+                );
             }
         }
 
@@ -648,6 +830,7 @@ impl eframe::App for CAApp {
         if self.active_mask[self.selected_trait] == 0 { // update currenlty displayed trait if needed
             if let Some(new_idx) = (0..9).find(|&i| self.active_mask[i] == 1) {
                 self.selected_trait = new_idx;
+                flag_update_texture = true;
             }
         }
         
@@ -740,23 +923,20 @@ impl eframe::App for CAApp {
             ));
 
             // Update texture only when needed
-            if self.grid_texture.is_none()
-                || self.last_rendered_timestep != self.timestep
-                || flag_update_texture
-            {
-                self.update_grid_texture(ctx);
+            if self.last_rendered_timestep != self.timestep || flag_update_texture {
+                self.update_grayscale_buffer();
             }
 
-            let Some(texture) = &self.grid_texture else { return };
-
-            // --------------------------------------------------
-            // Persistent scroll ID (CRITICAL)
-            // --------------------------------------------------
+            // Persistent scroll ID
             let scroll_id = ui.make_persistent_id("grid_scroll");
 
-            // --------------------------------------------------
-            // ScrollArea
-            // --------------------------------------------------
+            // Calculate content size (logical size of the entire grid)
+            let content_size = egui::vec2(
+                self.grid_width as f32 * self.cell_size,
+                self.grid_height as f32 * self.cell_size,
+            );
+
+            // ScrollArea configuration
             let mut scroll_area = egui::ScrollArea::both()
                 .id_salt(scroll_id)
                 .auto_shrink([false, false]);
@@ -766,17 +946,40 @@ impl eframe::App for CAApp {
             }
 
             let scroll_output = scroll_area.show(ui, |ui| {
-                let size = egui::vec2(
-                    self.grid_width as f32 * self.cell_size,
-                    self.grid_height as f32 * self.cell_size,
-                );
+                // Allocate the full content size to enable scrolling
+                let (response, _painter) = ui.allocate_painter(content_size, egui::Sense::drag());
 
-                ui.add(
-                    egui::Image::from_texture(texture)
-                        .fit_to_exact_size(size)
-                        .sense(egui::Sense::drag()),
-                )
+                response
             });
+
+            // Now get the scroll offset AFTER the scroll area has updated
+            let current_scroll = scroll_output.state.offset;
+            let viewport_rect = scroll_output.inner_rect;
+            
+            // Render the visible portion using a separate paint callback
+            let painter = ui.painter_at(viewport_rect);
+            
+            let screen = ctx.screen_rect().size();
+            let screen_arr = [screen.x, screen.y];
+            let scheme = self.color_scheme.to_index();
+            let base = self.base_color_no_actor;
+            let renderer = self.gpu_renderer.clone();
+            
+            let cb = egui::PaintCallback {
+                rect: viewport_rect,
+                callback: Arc::new(egui_glow::CallbackFn::new(
+                    move |_info, _painter| {
+                        if let Ok(guard) = renderer.lock() {
+                            if let Some(ref r) = *guard {
+                                r.paint(scheme, base, viewport_rect, screen_arr, 
+                                    current_scroll, content_size);
+                            }
+                        }
+                    }
+                )),
+            };
+            
+            painter.add(cb);
 
             let image_response = scroll_output.inner;
             let viewport_rect = scroll_output.inner_rect;
@@ -786,68 +989,68 @@ impl eframe::App for CAApp {
             if self.show_values && self.cell_size >= self.show_values_minimum_cell_size {
                 let painter = ui.painter();
                 let values = self.grid.get_cell_trait_array(self.selected_trait);
-                
-                // Calculate visible cell range
+
+                // Calculate visible cell range based on scroll offset
                 let scroll_offset = scroll_output.state.offset;
-                
+
                 let start_col = (scroll_offset.x / self.cell_size).floor() as usize;
                 let start_row = (scroll_offset.y / self.cell_size).floor() as usize;
                 let visible_cols = (viewport_rect.width() / self.cell_size).ceil() as usize + 1;
                 let visible_rows = (viewport_rect.height() / self.cell_size).ceil() as usize + 1;
                 let end_col = (start_col + visible_cols).min(self.grid_width);
                 let end_row = (start_row + visible_rows).min(self.grid_height);
-                
+
                 // Capture needed values to avoid borrowing issues
                 let grid_width = self.grid_width;
                 let cell_size = self.cell_size;
-                
+
                 // Create index pairs for only visible cells
                 let visible_cells: Vec<_> = (start_row..end_row)
                     .flat_map(|row| {
                         (start_col..end_col).map(move |col| (row, col))
                     })
                     .collect();
-                
+
                 // Process visible cells in parallel
                 let text_data: Vec<_> = visible_cells
                     .par_iter()
                     .filter_map(|&(row, col)| {
                         let idx = row * grid_width + col;
                         let value = values[idx];
-                        
+
                         // Skip empty cells
                         if self.grid.is_cell_empty(row, col) == 1 {
                             return None;
                         }
-                        
-                        // Calculate cell center in screen coordinates
-                        let cell_x = viewport_rect.min.x + (col as f32 + 0.5) * cell_size - scroll_offset.x;
-                        let cell_y = viewport_rect.min.y + (row as f32 + 0.5) * cell_size - scroll_offset.y;
+
+                        // Calculate cell center - using image_response.rect instead of viewport_rect
+                        // because that's where the actual grid is drawn
+                        let cell_x = image_response.rect.min.x + (col as f32 + 0.5) * cell_size;
+                        let cell_y = image_response.rect.min.y + (row as f32 + 0.5) * cell_size;
                         let pos = egui::pos2(cell_x, cell_y);
-                        
+
                         let cell_color = self.color_scheme.map_value(
                             value,
                             false,
                             self.base_color_no_actor,
                         );
-                        
+
                         // Calculate luminance (perceived brightness)
-                        // Using the standard formula for relative luminance
-                        let luminance = 0.2126 * cell_color[0] as f32 
-                                    + 0.7152 * cell_color[1] as f32 
+                        let luminance = 0.2126 * cell_color[0] as f32
+                                    + 0.7152 * cell_color[1] as f32
                                     + 0.0722 * cell_color[2] as f32;
-                        
+
                         // Choose white text for dark backgrounds, black for light backgrounds
                         let text_color = if luminance < 128.0 {
                             egui::Color32::WHITE
                         } else {
                             egui::Color32::BLACK
                         };
-                        
+
                         Some((pos, value, text_color))
                     })
                     .collect();
-                
+
                 // Draw all text (must be done on main thread due to painter)
                 let font_size = (self.cell_size * 0.4).min(14.0);
                 for (pos, value, text_color) in text_data {
@@ -861,15 +1064,11 @@ impl eframe::App for CAApp {
                 }
             }
 
-            // --------------------------------------------------
             // PAN via mouse drag
-            // --------------------------------------------------
             if pointer_over && image_response.dragged() {
                 let delta = image_response.drag_delta();
 
-                if let Some(mut state) =
-                    egui::scroll_area::State::load(ctx, scroll_id)
-                {
+                if let Some(mut state) = egui::scroll_area::State::load(ctx, scroll_id) {
                     state.offset -= delta;
                     state.store(ctx, scroll_id);
                 }
@@ -877,18 +1076,14 @@ impl eframe::App for CAApp {
                 ctx.request_repaint();
             }
 
-            // --------------------------------------------------
             // PAN via wheel / trackpad (no Ctrl)
-            // --------------------------------------------------
             let scroll = ctx.input(|i| i.raw_scroll_delta);
 
             if pointer_over && scroll != egui::Vec2::ZERO {
                 let ctrl = ctx.input(|i| i.modifiers.ctrl);
 
                 if !ctrl {
-                    if let Some(mut state) =
-                        egui::scroll_area::State::load(ctx, scroll_id)
-                    {
+                    if let Some(mut state) = egui::scroll_area::State::load(ctx, scroll_id) {
                         state.offset -= scroll;
                         state.store(ctx, scroll_id);
                     }
@@ -897,9 +1092,7 @@ impl eframe::App for CAApp {
                 }
             }
 
-            // --------------------------------------------------
             // ZOOM via Ctrl + scroll (cursor anchored)
-            // --------------------------------------------------
             if pointer_over {
                 let zoom_scroll = ctx.input(|i| {
                     if i.modifiers.ctrl {

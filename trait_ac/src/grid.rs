@@ -6,7 +6,7 @@ use rand::Rng;
 pub struct Grid {
     pub width: usize,
     pub height: usize,
-    pub traits: Vec<[f32; 9]>,
+    pub traits: [Vec<f32>; 9],
     pub is_empty: Vec<u8>,
 }
 
@@ -30,7 +30,7 @@ impl Grid {
         let mut rng = rand::thread_rng();
         let len = width * height;
 
-        let mut traits = vec![[0.0; 9]; len];
+        let mut traits: [Vec<f32>; 9] = std::array::from_fn(|_| vec![0.0; len]);
         let mut is_empty = vec![1u8; len];
 
         for row in 0..height {
@@ -39,7 +39,7 @@ impl Grid {
                 if rng.gen_range(0.0..=1.0) < fill_percentage {
                     is_empty[idx] = 0;
                     for t in 0..9 {
-                        traits[idx][t] = rng.gen_range(0.0..=1.0);
+                        traits[t][idx] = rng.gen_range(0.0..=1.0);
                     }
                 }
             }
@@ -88,7 +88,7 @@ impl Grid {
     #[inline(always)]
     pub fn get_cell_trait(&self, row: usize, col: usize, trait_idx: usize) -> f32 {
         unsafe {
-            self.traits.get_unchecked(self.idx(row, col))[trait_idx]
+            *self.traits[trait_idx].get_unchecked(self.idx(row, col))
         }
     }
 
@@ -109,7 +109,7 @@ impl Grid {
     pub fn set_cell_trait(&mut self, row: usize, col: usize, trait_idx: usize, value: f32) {
         let pos = self.idx(row, col);
         unsafe {
-            self.traits.get_unchecked_mut(pos)[trait_idx] = value;
+            *self.traits[trait_idx].get_unchecked_mut(pos) = value;
         }
     }
 
@@ -132,14 +132,7 @@ impl Grid {
     /// Get trait values for all cells in row-major order
     #[inline]
     pub fn get_cell_trait_array(&self, trait_index: usize) -> Vec<f32> {
-        let mut out = Vec::with_capacity(self.traits.len());
-
-        for cell_traits in &self.traits {
-            // SAFETY: trait_index is assumed valid (0..9)
-            out.push(unsafe { *cell_traits.get_unchecked(trait_index) });
-        }
-
-        out
+        self.traits[trait_index].clone()
     }
 
 
@@ -158,10 +151,10 @@ impl Grid {
 
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
-        for i in 0..self.traits.len() {
+        for i in 0..self.traits[0].len() {
             if self.is_empty[i] == 0 {
                 for t in 0..9 {
-                    self.traits[i][t] = rng.gen_range(0.0..=1.0);
+                    self.traits[t][i] = rng.gen_range(0.0..=1.0);
                 }
             }
         }
