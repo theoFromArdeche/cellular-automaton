@@ -106,61 +106,59 @@ fn main() {
         let width = grid.width;
 
         // --- OPTIMIZED TRAIT UPDATE ---
+        // Process each trait vector in parallel
         next_grid.traits
-            .par_chunks_mut(rows_per_batch * width)
-            .zip(next_grid.is_empty.par_chunks_mut(rows_per_batch * width))
+            .par_iter_mut()
+            .zip(grid.traits.par_iter())
             .enumerate()
-            .for_each(|(chunk_idx, (next_traits_chunk, next_empty_chunk))| {
+            .for_each(|(trait_idx, (next_trait_vec, current_trait_vec))| {
+                // Skip inactive traits entirely
+                if active_mask[trait_idx] == 0 {
+                    next_trait_vec.copy_from_slice(current_trait_vec);
+                    return;
+                }
+
+                // Process this trait for all cells
+                next_trait_vec
+                    .par_chunks_mut(rows_per_batch * width)
+                    .enumerate()
+                    .for_each(|(chunk_idx, next_trait_chunk)| {
+                        let start_idx = chunk_idx * rows_per_batch * width;
+                        
+                        for i in 0..next_trait_chunk.len() {
+                            let cell_idx = start_idx + i;
+                            
+                            // FAST PATH: Skip empty cells
+                            if grid.is_empty[cell_idx] != 0 {
+                                next_trait_chunk[i] = current_trait_vec[cell_idx];
+                                continue;
+                            }
+                            
+                            // Calculate position
+                            let row = cell_idx / width;
+                            let col = cell_idx % width;
+                            
+                            // Apply rule only for this trait
+                            next_trait_chunk[i] = rules_registry.apply_rule(
+                                trait_idx, 
+                                row, 
+                                col, 
+                                &neighborhood_traits, 
+                                &grid
+                            );
+                        }
+                    });
+            });
+
+        // Update is_empty separately (only once, not per trait)
+        next_grid.is_empty
+            .par_chunks_mut(rows_per_batch * width)
+            .enumerate()
+            .for_each(|(chunk_idx, next_empty_chunk)| {
                 let start_idx = chunk_idx * rows_per_batch * width;
-                
-                for i in 0..next_traits_chunk.len() {
+                for i in 0..next_empty_chunk.len() {
                     let cell_idx = start_idx + i;
-                    
-                    // FAST PATH: Skip empty cells
-                    if grid.is_empty[cell_idx] != 0 {
-                        next_traits_chunk[i] = grid.traits[cell_idx];
-                        next_empty_chunk[i] = 1;
-                        continue;
-                    }
-
-                    // Calculate position once
-                    let row = cell_idx / width;
-                    let col = cell_idx % width;
-
-                    // Copy base state
-                    next_traits_chunk[i] = grid.traits[cell_idx];
-                    next_empty_chunk[i] = 0;
-
-                    // OPTIMIZATION: Unroll loop manually for all 9 possible traits
-                    // The compiler can optimize away inactive branches with the const bool array
-                    // This is much faster than iterating over a Vec
-                    if active_mask[0] == 1 {
-                        next_traits_chunk[i][0] = rules_registry.apply_rule(0, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[1] == 1 {
-                        next_traits_chunk[i][1] = rules_registry.apply_rule(1, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[2] == 1 {
-                        next_traits_chunk[i][2] = rules_registry.apply_rule(2, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[3] == 1 {
-                        next_traits_chunk[i][3] = rules_registry.apply_rule(3, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[4] == 1 {
-                        next_traits_chunk[i][4] = rules_registry.apply_rule(4, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[5] == 1 {
-                        next_traits_chunk[i][5] = rules_registry.apply_rule(5, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[6] == 1 {
-                        next_traits_chunk[i][6] = rules_registry.apply_rule(6, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[7] == 1 {
-                        next_traits_chunk[i][7] = rules_registry.apply_rule(7, row, col, &neighborhood_traits, &grid);
-                    }
-                    if active_mask[8] == 1 {
-                        next_traits_chunk[i][8] = rules_registry.apply_rule(8, row, col, &neighborhood_traits, &grid);
-                    }
+                    next_empty_chunk[i] = grid.is_empty[cell_idx];
                 }
             });
 

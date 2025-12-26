@@ -2924,9 +2924,12 @@ dependencies = [
 name = "trait_ac_ui"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "eframe",
  "egui",
+ "egui_glow",
  "egui_plot",
+ "glow 0.14.2",
  "rayon",
  "serde",
  "trait_ac",

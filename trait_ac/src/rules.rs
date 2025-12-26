@@ -108,7 +108,7 @@ impl Rules {
                 let is_occupied = *grid.is_empty.get_unchecked(idx) == 0; 
                 // Only fetch trait if occupied (short-circuiting)
                 if is_occupied {
-                    let val = grid.traits.get_unchecked(idx)[trait_index];
+                    let val = *grid.traits[trait_index].get_unchecked(idx);
                     if val > 0.5 {
                         alive_neighbors += 1;
                     }
@@ -118,7 +118,7 @@ impl Rules {
 
         // 4. Determine state of current cell
         let current_idx = cell_r * w + cell_c;
-        let current_val = unsafe { grid.traits.get_unchecked(current_idx)[trait_index] };
+        let current_val = unsafe { *grid.traits[trait_index].get_unchecked(current_idx) };
         let is_alive = current_val > 0.5;
 
         // 5. Apply Rules (Branchless or simplified)

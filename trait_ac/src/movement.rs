@@ -489,45 +489,69 @@ impl MovementRegistry {
         }
 
         // --- Phase 4: Construct next grid ---
+        // Update is_empty first (independent of traits)
         next_grid
-            .traits
+            .is_empty
             .par_iter_mut()
-            .zip(next_grid.is_empty.par_iter_mut())
             .enumerate()
-            .for_each(|(idx, (out_traits, out_empty))| {
-                let _r = idx / width;
-                let _c = idx % width;
-
+            .for_each(|(idx, out_empty)| {
                 if grid.is_empty[idx] != 0 {
-                    match self.reserved[idx] {
-                        Some((sr, sc)) => {
-                            let src_idx = sr as usize * width + sc as usize;
-                            *out_traits = grid.traits[src_idx];
-                            *out_empty = 0;
-                        }
-                        None => {
-                            *out_empty = 1;
-                        }
-                    }
+                    *out_empty = match self.reserved[idx] {
+                        Some(_) => 0,
+                        None => 1,
+                    };
                     return;
                 }
-
+                
                 match self.states[idx] {
-                    ResolveState::Resolved(true) => match self.reserved[idx] {
-                        Some((sr, sc)) => {
-                            let src_idx = sr as usize * width + sc as usize;
-                            *out_traits = grid.traits[src_idx];
-                            *out_empty = 0;
-                        }
-                        None => {
-                            *out_empty = 1;
-                        }
-                    },
+                    ResolveState::Resolved(true) => {
+                        *out_empty = match self.reserved[idx] {
+                            Some(_) => 0,
+                            None => 1,
+                        };
+                    }
                     _ => {
-                        *out_traits = grid.traits[idx];
                         *out_empty = 0;
                     }
                 }
+            });
+
+        // Update all traits in parallel (one pass per trait)
+        next_grid
+            .traits
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(trait_idx, out_trait_vec)| {
+                out_trait_vec
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(idx, out_trait_val)| {
+                        if grid.is_empty[idx] != 0 {
+                            *out_trait_val = match self.reserved[idx] {
+                                Some((sr, sc)) => {
+                                    let src_idx = sr as usize * width + sc as usize;
+                                    grid.traits[trait_idx][src_idx]
+                                }
+                                None => grid.traits[trait_idx][idx],
+                            };
+                            return;
+                        }
+                        
+                        match self.states[idx] {
+                            ResolveState::Resolved(true) => {
+                                *out_trait_val = match self.reserved[idx] {
+                                    Some((sr, sc)) => {
+                                        let src_idx = sr as usize * width + sc as usize;
+                                        grid.traits[trait_idx][src_idx]
+                                    }
+                                    None => grid.traits[trait_idx][idx],
+                                };
+                            }
+                            _ => {
+                                *out_trait_val = grid.traits[trait_idx][idx];
+                            }
+                        }
+                    });
             });
     }
 
