@@ -44,8 +44,20 @@ fn main() {
     let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
     let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
 
+    let configuration_traits_ranges = [
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+    ];
+
     // Initialize grid
-    let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density);
+    let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density, configuration_traits_ranges);
 
     // Default neighborhood
     let neighborhood_traits = Neighborhood::new(

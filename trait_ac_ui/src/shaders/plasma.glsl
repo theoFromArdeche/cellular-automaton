@@ -38,6 +38,5 @@ vec3 plasma(float t) {
 
 void main() {
     float gray = texture(u_texture, v_tc).r;
-    float v = u_base_color + gray * (1.0 - u_base_color);
-    FragColor = vec4(plasma(v), 1.0);
+    FragColor = vec4(plasma(gray), 1.0);
 }
