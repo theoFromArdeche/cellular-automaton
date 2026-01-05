@@ -13,23 +13,18 @@ pub struct Grid {
 impl Grid {
     /// Create a new grid with random cells
     pub fn new(width: usize, height: usize) -> Self {
-        Self::new_with_density(width, height, 1.0)
+        Self::new_with_density(width, height, 1.0, [(0.0, 1.0); 9])
     }
 
-    /// Create a new grid with a specified density of filled cells
-    /// 
-    /// # Arguments
-    /// * `width` - Width of the grid
-    /// * `height` - Height of the grid
-    /// * `fill_percentage` - Percentage of cells to fill (0.0 to 1.0)
-    ///   - 1.0 = 100% filled (all cells have random values)
-    ///   - 0.5 = 50% filled, 50% empty
-    ///   - 0.0 = 0% filled (all cells are empty)
-    pub fn new_with_density(width: usize, height: usize, fill_percentage: f32) -> Self {
+    pub fn new_with_density(width: usize,
+                            height: usize,
+                            fill_percentage: f32,
+                            trait_ranges: [(f32, f32); 9],  // (min, max) for each trait
+                            ) -> Self {
+
         let fill_percentage = fill_percentage.clamp(0.0, 1.0);
         let mut rng = rand::thread_rng();
         let len = width * height;
-
         let mut traits: [Vec<f32>; 9] = std::array::from_fn(|_| vec![0.0; len]);
         let mut is_empty = vec![1u8; len];
 
@@ -39,7 +34,8 @@ impl Grid {
                 if rng.gen_range(0.0..=1.0) < fill_percentage {
                     is_empty[idx] = 0;
                     for t in 0..9 {
-                        traits[t][idx] = rng.gen_range(0.0..=1.0);
+                        let (min, max) = trait_ranges[t];
+                        traits[t][idx] = rng.gen_range(min..=max);
                     }
                 }
             }

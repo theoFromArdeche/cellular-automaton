@@ -273,6 +273,7 @@ struct CAApp {
     grid_width: usize, // usefull if the Grid object is reset
     grid_height: usize,
     grid_density: f32,
+    configuration_traits_ranges: [(f32, f32); 9],
     next_grid: Grid,
     
     // Simulation state
@@ -330,8 +331,8 @@ impl CAApp {
         };
 
         // Configuration
-        let grid_width = 3000;
-        let grid_height = 3000;
+        let grid_width = 1000;
+        let grid_height = 1000;
         let steps_per_second = 100.0;
         let grid_density = 1.0;
 
@@ -347,7 +348,7 @@ impl CAApp {
         let steps_per_second_min = 1.0;
         let steps_per_second_max = 500.0;
 
-        let cell_size = 0.5;
+        let cell_size = 1.0;
         let cell_size_min = 0.1;
         let cell_size_max = 100.0;
 
@@ -387,8 +388,20 @@ impl CAApp {
         let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
         let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
 
+        let configuration_traits_ranges = [
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 1.0),
+        ];
+
         // Initialize grid
-        let grid = Grid::new_with_density(grid_width, grid_height, grid_density);
+        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, configuration_traits_ranges);
 
 
         // Default neighborhood
@@ -437,6 +450,7 @@ impl CAApp {
             grid_width,
             grid_height,
             grid_density,
+            configuration_traits_ranges,
             next_grid,
 
             timestep: 0,
@@ -551,7 +565,7 @@ impl CAApp {
     }
     
     fn reset_grid(&mut self) {
-        self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density);
+        self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density, self.configuration_traits_ranges);
         self.next_grid =  Grid {
             width: self.grid.width,
             height: self.grid.height,
