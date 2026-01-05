@@ -331,10 +331,10 @@ impl CAApp {
         };
 
         // Configuration
-        let grid_width = 1000;
-        let grid_height = 1000;
-        let steps_per_second = 100.0;
-        let grid_density = 1.0;
+        let grid_width = 500;
+        let grid_height = 500;
+        let steps_per_second = 1000.0;
+        let grid_density = 0.5;
 
         let timed_simulation = false;
         let timestep_max = 100;
@@ -346,7 +346,7 @@ impl CAApp {
         let grid_height_max = 5000;
 
         let steps_per_second_min = 1.0;
-        let steps_per_second_max = 500.0;
+        let steps_per_second_max = 10000.0;
 
         let cell_size = 1.0;
         let cell_size_min = 0.1;
@@ -359,7 +359,7 @@ impl CAApp {
         let base_color_no_actor = 0.0;
 
         let active_mask: [u8; 9] = [
-            1, 0, 0,
+            1, 1, 0,
             0, 0, 0,
             0, 0, 0,
         ];
@@ -426,13 +426,13 @@ impl CAApp {
 
         // Create custom rule set
         let rules: [RuleFn; 9] = [
-                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
+                Rules::social_energy, Rules::social_influence, Rules::conway_optimized,
                 Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
                 Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
         ];
         let rules_registry = RulesRegistry::custom(rules);
 
-        let movement_function: MovementFn = Movements::static_movement; 
+        let movement_function: MovementFn = Movements::social_movement; 
         let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
 
         // Pre-allocate next grid
