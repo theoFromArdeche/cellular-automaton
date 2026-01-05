@@ -272,6 +272,71 @@ impl Rules {
 
         ((max_bin as f32 + 0.5) / 5.0).clamp(0.0, 1.0)
     }
+
+    /// Energy increases when social needs are met
+    /// High-social individuals gain energy near others
+    /// Low-social individuals gain energy when alone
+    pub fn social_energy(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
+        let social = grid.get_cell_trait(cell_r, cell_c, 1);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut neighbor_count = 0;
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if grid.is_cell_empty(grid_r, grid_c) == 0 {
+                        neighbor_count += 1;
+                    }
+                }
+            }
+        }
+        
+        let density = neighbor_count as f32 / 8.0;  // Assuming 3x3 neighborhood
+        
+        // Social individuals want density, loners want solitude
+        let satisfaction = 1.0 - (social - density).abs();
+        
+        // Energy drifts toward satisfaction level
+        (energy * 0.8 + satisfaction * 0.2).clamp(0.0, 1.0)
+    }
+
+    /// Individuals become more like their neighbors over time
+    pub fn social_influence(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let my_social = grid.get_cell_trait(cell_r, cell_c, 1);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut neighbor_social_sum = 0.0;
+        let mut neighbor_count = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if grid.is_cell_empty(grid_r, grid_c) == 0 {
+                        neighbor_social_sum += grid.get_cell_trait(grid_r, grid_c, 1);
+                        neighbor_count += 1;
+                    }
+                }
+            }
+        }
+        
+        if neighbor_count == 0 {
+            // Alone: drift toward being a loner
+            (my_social * 0.90).max(0.0)
+        } else {
+            // With others: average slightly toward neighbors
+            let avg = neighbor_social_sum / neighbor_count as f32;
+            my_social * 0.80 + avg * 0.2
+        }
+    }
 }
 
 
@@ -295,6 +360,8 @@ static RULE_LOOKUP: &[(RuleFn, &str)] = &[
     (Rules::minimum, "minimum"),
     (Rules::weighted_average, "weighted_average"),
     (Rules::majority, "majority"),
+    (Rules::social_energy, "social energy"),
+    (Rules::social_influence, "social influence"),
 ];
 
 const RULE_COUNT: usize = RULE_LOOKUP.len();

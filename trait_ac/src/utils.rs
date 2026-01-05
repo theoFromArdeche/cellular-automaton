@@ -81,8 +81,8 @@ pub fn default_traits_names() -> [String; 9] {
 pub fn semantic_traits_names() -> [String; 9] {
     [
         "Energy".to_string(),
-        "Confidence".to_string(),
-        "Cooperation".to_string(),
+        "Social".to_string(),
+        "Color/Team".to_string(),
         "Aggression".to_string(),
         "Stability".to_string(),
         "Mobility".to_string(),
