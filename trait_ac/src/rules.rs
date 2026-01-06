@@ -93,7 +93,7 @@ impl Rules {
         let row_curr = cell_r * w;
         let row_next = r_next * w;
         
-        let t = &grid.traits[trait_index];
+        let t = grid.get_trait_slice(trait_index);
         
         unsafe {
             // Count alive: cast (value > 0.5) directly to u8

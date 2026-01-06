@@ -429,7 +429,8 @@ impl CAApp {
         let next_grid = Grid {
             width: grid.width,
             height: grid.height,
-            traits: grid.traits.clone(),
+            num_cells: grid.num_cells,
+            data: grid.data.clone(),
             is_empty: grid.is_empty.clone(),
         };
 
@@ -493,36 +494,33 @@ impl CAApp {
         }
         let width = self.grid.width;
  
-        // Process each trait in parallel
-        self.next_grid.traits
-            .par_iter_mut()
-            .enumerate()
-            .filter(|(idx, _)| self.active_traits.contains(idx))
-            .for_each(|(trait_idx, next_trait)| {
-                let current = &self.grid.traits[trait_idx];
-                
-                // Process rows in parallel, use tiling within each row for cache locality
-                next_trait
-                    .par_chunks_mut(width)
-                    .enumerate()
-                    .for_each(|(row, next_row)| {
-                        let row_offset = row * width;
+        // Sequential over active traits (small number), parallel over rows
+        for &trait_idx in &self.active_traits {
+            let current = self.grid.get_trait_slice(trait_idx);
+            let next_trait = self.next_grid.get_trait_slice_mut(trait_idx);
+            
+            // Process rows in parallel
+            next_trait
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each(|(row, next_row)| {
+                    let row_offset = row * width;
+                    
+                    // Process in cache-friendly chunks of 64
+                    for chunk_start in (0..width).step_by(64) {
+                        let chunk_end = (chunk_start + 64).min(width);
                         
-                        // Process in cache-friendly chunks of 64
-                        for chunk_start in (0..width).step_by(64) {
-                            let chunk_end = (chunk_start + 64).min(width);
-                            
-                            for col in chunk_start..chunk_end {
-                                let idx = row_offset + col;
-                                next_row[col] = if self.grid.is_empty[idx] {
-                                    current[idx]
-                                } else {
-                                    self.rules_registry.apply_rule(trait_idx, row, col, &self.neighborhood_traits, &self.grid)
-                                };
-                            }
+                        for col in chunk_start..chunk_end {
+                            let idx = row_offset + col;
+                            next_row[col] = if self.grid.is_empty[idx] {
+                                current[idx]
+                            } else {
+                                self.rules_registry.apply_rule(trait_idx, row, col, &self.neighborhood_traits, &self.grid)
+                            };
                         }
-                    });
-            });
+                    }
+                });
+        }
 
         // --- STEP 2: Movement ---
         self.movement_registry.apply_movement(
@@ -537,10 +535,12 @@ impl CAApp {
     fn reset_grid(&mut self) {
         self.grid = Grid::new_with_density(self.grid.width, self.grid.height, self.grid_density, self.initialisation_ranges);
         self.movement_registry.prepare(self.grid.width, self.grid.height);
-        self.next_grid =  Grid {
+        // Pre-allocate next grid
+        self.next_grid = Grid {
             width: self.grid.width,
             height: self.grid.height,
-            traits: self.grid.traits.clone(),
+            num_cells: self.grid.num_cells,
+            data: self.grid.data.clone(),
             is_empty: self.grid.is_empty.clone(),
         };
         self.rows_per_batch = std::cmp::max(1, 4000 / self.grid.width);
@@ -576,7 +576,7 @@ impl CAApp {
                 for (col, pixel) in pixels.iter_mut().enumerate() {
                     let idx = start + col;
                     let is_not_empty = (!self.grid.is_empty[idx]) as u8;
-                    let trait_val = self.grid.traits[self.selected_trait][idx];
+                    let trait_val = self.grid.get_cell_trait(row, col, self.selected_trait);
                     let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
 
                     *pixel = offset_val * is_not_empty;
@@ -887,7 +887,7 @@ impl eframe::App for CAApp {
                                     continue;
                                 }
 
-                                let values = &self.grid.traits[trait_idx];
+                                let values = self.grid.get_trait_slice(trait_idx);
 
                                 let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
                                 let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -973,7 +973,7 @@ impl eframe::App for CAApp {
             // Draw values on top if zoomed in enough
             if self.show_values && self.cell_size >= self.show_values_minimum_cell_size {
                 let painter = ui.painter();
-                let values = &self.grid.traits[self.selected_trait];
+                let values = self.grid.get_trait_slice(self.selected_trait);
 
                 // Calculate visible cell range based on scroll offset
                 let scroll_offset = scroll_output.state.offset;
