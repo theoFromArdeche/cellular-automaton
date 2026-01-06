@@ -99,7 +99,6 @@ impl ColorScheme {
     }
 }
 
-// GPU Renderer - Embedded in main.rs for simplicity
 struct GPURenderer {
     gl: Arc<glow::Context>,
     texture: glow::Texture,
@@ -120,7 +119,7 @@ impl GPURenderer {
             ];
             
             let mut programs = [None, None, None, None];
-            for i in 0..4 {
+            for i in 0..fragment_shaders.len() {
                 programs[i] = Some(Self::create_program(&gl, vertex_shader_src, fragment_shaders[i])?);
             }
             
@@ -285,9 +284,11 @@ struct CAApp {
     grayscale_buffer: Vec<u8>,
     central_panel_offset: Option<egui::Vec2>,
     last_rendered_timestep: usize,
+    avg_step_time: Option<f32>,
     
     // Configuration
     active_mask: [u8; 9],
+    active_traits: Vec<usize>,
     neighborhood_traits: Neighborhood,
     neighborhood_mvt: Neighborhood,
     rules_registry: RulesRegistry,
@@ -433,6 +434,12 @@ impl CAApp {
         };
 
         let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
+
+        let active_traits: Vec<usize> = active_mask
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
+            .collect();
         
         Self {
             grid,
@@ -451,8 +458,10 @@ impl CAApp {
             grayscale_buffer: Vec::new(),
             central_panel_offset: None,
             last_rendered_timestep: 999999,
+            avg_step_time: None,
 
             active_mask,
+            active_traits,
             neighborhood_traits,
             neighborhood_mvt,
             rules_registry,
@@ -483,46 +492,34 @@ impl CAApp {
             self.start = Instant::now();
         }
         let width = self.grid.width;
-
-        // Process each trait vector in parallel
+ 
+        // Process each trait in parallel
         self.next_grid.traits
             .par_iter_mut()
-            .zip(self.grid.traits.par_iter())
             .enumerate()
-            .for_each(|(trait_idx, (next_trait_vec, current_trait_vec))| {
-                // Skip inactive traits entirely
-                if self.active_mask[trait_idx] == 0 {
-                    return;
-                }
-
-                // Process this trait for all cells
-                next_trait_vec
-                    .par_chunks_mut(self.rows_per_batch * width)
+            .filter(|(idx, _)| self.active_traits.contains(idx))
+            .for_each(|(trait_idx, next_trait)| {
+                let current = &self.grid.traits[trait_idx];
+                
+                // Process rows in parallel, use tiling within each row for cache locality
+                next_trait
+                    .par_chunks_mut(width)
                     .enumerate()
-                    .for_each(|(chunk_idx, next_trait_chunk)| {
-                        let start_idx = chunk_idx * self.rows_per_batch * width;
+                    .for_each(|(row, next_row)| {
+                        let row_offset = row * width;
                         
-                        for i in 0..next_trait_chunk.len() {
-                            let cell_idx = start_idx + i;
+                        // Process in cache-friendly chunks of 64
+                        for chunk_start in (0..width).step_by(64) {
+                            let chunk_end = (chunk_start + 64).min(width);
                             
-                            // FAST PATH: Skip empty cells
-                            if self.grid.is_empty[cell_idx] != 0 {
-                                next_trait_chunk[i] = current_trait_vec[cell_idx];
-                                continue;
+                            for col in chunk_start..chunk_end {
+                                let idx = row_offset + col;
+                                next_row[col] = if self.grid.is_empty[idx] {
+                                    current[idx]
+                                } else {
+                                    self.rules_registry.apply_rule(trait_idx, row, col, &self.neighborhood_traits, &self.grid)
+                                };
                             }
-                            
-                            // Calculate position
-                            let row = cell_idx / width;
-                            let col = cell_idx % width;
-                            
-                            // Apply rule only for this trait
-                            next_trait_chunk[i] = self.rules_registry.apply_rule(
-                                trait_idx, 
-                                row, 
-                                col, 
-                                &self.neighborhood_traits, 
-                                &self.grid
-                            );
                         }
                     });
             });
@@ -578,7 +575,7 @@ impl CAApp {
                 let start = row * self.grid.width;
                 for (col, pixel) in pixels.iter_mut().enumerate() {
                     let idx = start + col;
-                    let is_not_empty = (self.grid.is_empty[idx] == 0) as u8;
+                    let is_not_empty = (!self.grid.is_empty[idx]) as u8;
                     let trait_val = self.grid.traits[self.selected_trait][idx];
                     let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
 
@@ -619,11 +616,7 @@ impl eframe::App for CAApp {
             println!("  Timesteps: {}", self.timestep);
             
             // Print active traits for info
-            let active_traits: Vec<usize> = self.active_mask.iter()
-                .enumerate()
-                .filter_map(|(i, &active)| if active == 1 { Some(i) } else { None })
-                .collect();
-            print_active_traits(&active_traits, &self.trait_names, &self.rules_registry);
+            print_active_traits(&self.active_mask, &self.trait_names, &self.rules_registry);
             
             let elapsed = self.start.elapsed();
             println!("\nExecution time: {:?}", elapsed);
@@ -656,32 +649,40 @@ impl eframe::App for CAApp {
             self.time_accumulator += ctx.input(|i| i.stable_dt);
             let step_duration = 1.0 / self.steps_per_second;
             
-            // Adaptive step limiting based on frame time
             let frame_time = ctx.input(|i| i.stable_dt);
-            let target_frame_time = 1.0 / 60.0; // Target 60 FPS
+            let target_frame_time = 1.0 / 60.0;
             
-            // Calculate how many steps we can afford this frame
-            let max_steps = if frame_time > target_frame_time * 1.5 {
-                1 // If we're lagging, only do 1 step per frame
-            } else {
-                10 // Otherwise allow up to 10 steps per frame
-            };
+            // Calculate remaining time budget based on actual frame time
+            // If last frame was slow, we have less budget this frame
+            let render_time_estimate = frame_time * 0.5; // Assume ~50% was rendering
+            let simulation_budget = (target_frame_time - render_time_estimate).max(0.001);
+            
+            let estimated_step_time = self.avg_step_time.unwrap_or(0.0001);
+            let max_steps = ((simulation_budget / estimated_step_time) as usize).max(1);
             
             let mut steps_taken = 0;
+            let step_start = std::time::Instant::now();
+            
             while self.time_accumulator >= step_duration && steps_taken < max_steps {
                 self.step_simulation();
                 self.time_accumulator -= step_duration;
                 steps_taken += 1;
             }
             
-            // Drop excess time if we can't keep up
+            if steps_taken > 0 {
+                let actual_step_time = step_start.elapsed().as_secs_f32() / steps_taken as f32;
+                self.avg_step_time = Some(match self.avg_step_time {
+                    Some(avg) => avg * 0.9 + actual_step_time * 0.1,
+                    None => actual_step_time,
+                });
+            }
+            
             if self.time_accumulator > step_duration * 2.0 {
                 self.time_accumulator = 0.0;
             }
             
             ctx.request_repaint();
         }
-
         let mut flag_update_texture = false;
         
         // Left panel: Controls
@@ -873,7 +874,10 @@ impl eframe::App for CAApp {
                     ui.separator();
 
                     // --- Trait Statistics ---
-                    ui.label("Trait Statistics");
+                    ui.label("Statistics");
+                    let fill_percentage = self.grid.get_fill_percentage();
+                    ui.label(format!("  density: {:.3}", fill_percentage));
+                    ui.separator();
                     egui::ScrollArea::vertical()
                         .max_height(300.0) // adjust as needed
                         .show(ui, |ui| {
@@ -1000,7 +1004,7 @@ impl eframe::App for CAApp {
                         let value = values[idx];
 
                         // Skip empty cells
-                        if self.grid.is_cell_empty(row, col) == 1 {
+                        if self.grid.is_cell_empty(row, col) {
                             return None;
                         }
 
