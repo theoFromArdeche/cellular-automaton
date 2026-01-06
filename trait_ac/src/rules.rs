@@ -26,7 +26,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
                     
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         sum += neighbor_value;
                         count += 1;
                     }
@@ -57,7 +57,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
 
-                    if neighbor_is_empty == 0 && neighbor_value > 0.5 {
+                    if !neighbor_is_empty && neighbor_value > 0.5 {
                         alive_neighbors += 1;
                     }
                 }
@@ -73,59 +73,51 @@ impl Rules {
         }
     }
 
-    /// Conway's Game of Life style with fixed neighborhood
-    pub fn conway_optimized(trait_index: usize, cell_r: usize, cell_c: usize, _neighborhood: &Neighborhood,grid: &Grid) -> f32 {
+    #[inline(always)]
+    pub fn conway_optimized(
+        trait_index: usize,
+        cell_r: usize,
+        cell_c: usize,
+        _neighborhood: &Neighborhood,
+        grid: &Grid,
+    ) -> f32 {
         let w = grid.width;
         let h = grid.height;
         
-        // 1. Pre-calculate neighbor coordinates with wrapping (Toroidal)
-        // Using simple logic avoids expensive modulo (%) operators where possible
-        let r_prev = if cell_r == 0 { h - 1 } else { cell_r - 1 };
-        let r_next = if cell_r == h - 1 { 0 } else { cell_r + 1 };
-        let c_prev = if cell_c == 0 { w - 1 } else { cell_c - 1 };
-        let c_next = if cell_c == w - 1 { 0 } else { cell_c + 1 };
-
-        // 2. Define the 8 neighbors indices (Row, Col)
-        // We group them to allow the CPU to potentially pipeline reads
-        let neighbors = [
-            (r_prev, c_prev), (r_prev, cell_c), (r_prev, c_next),
-            (cell_r, c_prev),                   (cell_r, c_next),
-            (r_next, c_prev), (r_next, cell_c), (r_next, c_next),
-        ];
-
-        let mut alive_neighbors = 0;
-
-        // 3. Direct Loop over pre-calculated coordinates
-        for &(nr, nc) in &neighbors {
-            // Calculate flat index: row * width + col
-            let idx = nr * w + nc;
-
-            // Direct Vector access is much faster than helper functions.
-            // Logic: Cell is NOT empty (0) AND Value > 0.5
-            // We assume is_empty uses 0 for occupied, 1 for empty (based on standard u8 usage)
-            // Adjust `== 0` to `!= 0` if your boolean logic is flipped.
-            unsafe {
-                let is_occupied = *grid.is_empty.get_unchecked(idx) == 0; 
-                // Only fetch trait if occupied (short-circuiting)
-                if is_occupied {
-                    let val = *grid.traits[trait_index].get_unchecked(idx);
-                    if val > 0.5 {
-                        alive_neighbors += 1;
-                    }
-                }
-            }
-        }
-
-        // 4. Determine state of current cell
-        let current_idx = cell_r * w + cell_c;
-        let current_val = unsafe { *grid.traits[trait_index].get_unchecked(current_idx) };
-        let is_alive = current_val > 0.5;
-
-        // 5. Apply Rules (Branchless or simplified)
-        if is_alive {
-            if alive_neighbors == 2 || alive_neighbors == 3 { 1.0 } else { 0.0 }
-        } else {
-            if alive_neighbors == 3 { 1.0 } else { 0.0 }
+        let r_prev = cell_r.wrapping_sub(1) % h;
+        let r_next = (cell_r + 1) % h;
+        let c_prev = cell_c.wrapping_sub(1) % w;
+        let c_next = (cell_c + 1) % w;
+        
+        let row_prev = r_prev * w;
+        let row_curr = cell_r * w;
+        let row_next = r_next * w;
+        
+        let t = &grid.traits[trait_index];
+        
+        unsafe {
+            // Count alive: cast (value > 0.5) directly to u8
+            let alive = 
+                (*t.get_unchecked(row_prev + c_prev) > 0.5) as u8 +
+                (*t.get_unchecked(row_prev + cell_c) > 0.5) as u8 +
+                (*t.get_unchecked(row_prev + c_next) > 0.5) as u8 +
+                (*t.get_unchecked(row_curr + c_prev) > 0.5) as u8 +
+                (*t.get_unchecked(row_curr + c_next) > 0.5) as u8 +
+                (*t.get_unchecked(row_next + c_prev) > 0.5) as u8 +
+                (*t.get_unchecked(row_next + cell_c) > 0.5) as u8 +
+                (*t.get_unchecked(row_next + c_next) > 0.5) as u8;
+            
+            let is_alive = *t.get_unchecked(row_curr + cell_c) > 0.5;
+            
+            // Combined branchless lookup: alive + 9 * is_alive indexes into single array
+            const RESULT: [f32; 18] = [
+                // Dead cell (indices 0-8)
+                0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                // Alive cell (indices 9-17)
+                0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            ];
+            
+            *RESULT.get_unchecked(alive as usize + 9 * is_alive as usize)
         }
     }
 
@@ -146,7 +138,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
 
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         sum += neighbor_value;
                         count += 1;
                     }
@@ -176,7 +168,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
 
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         max_val = max_val.max(neighbor_value);
                     }
                 }
@@ -198,7 +190,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
 
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         min_val = min_val.min(neighbor_value);
                     }
                 }
@@ -225,7 +217,7 @@ impl Rules {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
 
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         let dr = (mask_r as isize - center_row as isize).abs() as f32;
                         let dc = (mask_c as isize - center_col as isize).abs() as f32;
                         let w = 1.0 / (1.0 + (dr * dr + dc * dc).sqrt());
@@ -260,7 +252,7 @@ impl Rules {
                 if neighborhood.is_valid(mask_r, mask_c) == 1 
                 && !(mask_r == center_row && mask_c == center_col) {
                     let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
-                    if grid.is_cell_empty(grid_r, grid_c) == 0 {
+                    if !grid.is_cell_empty(grid_r, grid_c) {
                         neighbor_count += 1;
                     }
                 }
@@ -291,7 +283,7 @@ impl Rules {
                 if neighborhood.is_valid(mask_r, mask_c) == 1 
                 && !(mask_r == center_row && mask_c == center_col) {
                     let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
-                    if grid.is_cell_empty(grid_r, grid_c) == 0 {
+                    if !grid.is_cell_empty(grid_r, grid_c) {
                         neighbor_social_sum += grid.get_cell_trait(grid_r, grid_c, 1);
                         neighbor_count += 1;
                     }

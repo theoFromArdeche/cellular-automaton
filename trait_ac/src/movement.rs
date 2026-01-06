@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rand::prelude::*;
 
 
-
 pub struct Movements;
 
 impl Movements {
@@ -58,7 +57,7 @@ impl Movements {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
                     
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         if neighbor_value > best_val {
                             // Found a new best value - reset the list
                             best_val = neighbor_value;
@@ -104,7 +103,7 @@ impl Movements {
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
                     
-                    if neighbor_is_empty == 0 {
+                    if !neighbor_is_empty {
                         sum += neighbor_value;
                         count += 1;
                     }
@@ -165,7 +164,7 @@ impl Movements {
                 if neighborhood.is_valid(mask_r, mask_c) == 1 
                 && !(mask_r == center_row && mask_c == center_col) {
                     let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
-                    if grid.is_cell_empty(grid_r, grid_c) == 0 {
+                    if !grid.is_cell_empty(grid_r, grid_c) {
                         let dr = mask_r as f32 - center_row as f32;
                         let dc = mask_c as f32 - center_col as f32;
                         crowd_dr += dr;
@@ -370,40 +369,38 @@ impl MovementRegistry {
         // --- Phase 1: Parallel Bidding ---
         self.intentions
             .par_chunks_mut(chunk_len)
-            .zip(next_grid.is_empty.par_chunks(chunk_len)) // the is_empty is never changed on the temp grid (here "grid")
             .enumerate()
-            .for_each(|(batch_idx, (intent_chunk, empty_chunk))| {
+            .for_each(|(batch_idx, intent_chunk)| {
                 let mut rng = rand::thread_rng();
                 let start_idx = batch_idx * chunk_len;
-
+                
                 for i in 0..intent_chunk.len() {
                     let global_idx = start_idx + i;
                     if global_idx >= len {
                         break;
                     }
-
+                    
                     let r = global_idx / width;
                     let c = global_idx % width;
-
-                    // skip empty cells
-                    if empty_chunk[i] == 1 {
+                    
+                    // Skip empty cells - BitVec: true = empty
+                    if next_grid.is_empty[global_idx] {
                         continue;
                     }
-
+                    
                     // Movement logic
                     let (dr, dc) = (self.movement_function)(r, c, neighborhood_mvt, grid);
-
                     let (tr, tc) = (
                         ((r as isize + dr).clamp(0, height as isize - 1)) as usize,
                         ((c as isize + dc).clamp(0, width as isize - 1)) as usize,
                     );
+                    
                     intent_chunk[i] = (tr as u16, tc as u16);
-
+                    
                     if (tr, tc) != (r, c) { // (tr, tc) == (r, c) is not in bid because its managed in step 3 (it always has priority)
                         let target_flat = tr * width + tc;
                         let priority: u32 = rng.next_u32();
                         let bid = ((priority as u64) << 32) | (global_idx as u64);
-
                         unsafe {
                             self.claims
                                 .get_unchecked(target_flat)
@@ -451,7 +448,7 @@ impl MovementRegistry {
                 let idx = r * width + c;
 
                 // We don't want to visit empty cells
-                if next_grid.is_empty[idx] == 1 {
+                if next_grid.is_empty[idx] {
                     self.states[idx] = ResolveState::Empty;
                     continue;
                 }
@@ -483,17 +480,26 @@ impl MovementRegistry {
         }
 
         // --- Phase 4: Construct next grid ---
-        next_grid
-            .is_empty
-            .par_iter_mut()
+        let raw = next_grid.is_empty.as_raw_mut_slice();
+        let total_len = self.reserved.len();
+        
+        raw.par_iter_mut()
             .enumerate()
-            .for_each(|(idx, out_empty)| {
-                // check if reserved
-                *out_empty = match self.reserved[idx] {
-                    Some(_) => 0,
-                    None => 1, // the cell will be empty
-                };
+            .for_each(|(word_idx, word)| {
+                let mut bits: u64 = 0;
+                let base_idx = word_idx * 64;
+                let end = (base_idx + 64).min(total_len);
+                
+                for idx in base_idx..end {
+                    // BitVec with Lsb0: bit 0 is least significant
+                    let bit = idx - base_idx;
+                    if self.reserved[idx].is_none() {
+                        bits |= 1 << bit;
+                    }
+                }
+                *word = bits;
             });
+        
 
         // Update all traits in parallel (one pass per trait)
         next_grid

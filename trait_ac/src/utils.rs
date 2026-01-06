@@ -27,7 +27,7 @@ pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String;
         print!("  [");
         for col in 0..grid.width {
             let idx = row * grid.width + col;
-            if grid.is_cell_empty(row, col) == 1 {
+            if grid.is_cell_empty(row, col) {
                 print!(".....");
             } else {
                 print!("{:.3}", values[idx]);

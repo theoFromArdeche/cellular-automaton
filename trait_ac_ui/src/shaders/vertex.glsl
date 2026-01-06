@@ -10,7 +10,7 @@ uniform vec2 u_rect_min;
 uniform vec2 u_rect_size;
 
 void main() {
-    // convert from absolute egui coords → rect-local
+    // convert from absolute egui coords -> rect-local
     vec2 local = a_pos - u_rect_min;
 
     // normalize

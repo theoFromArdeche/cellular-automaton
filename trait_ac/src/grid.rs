@@ -1,5 +1,5 @@
 use rand::Rng;
-
+use bitvec::prelude::*;
 
 
 /// Represents a 2D grid of cells (row-major, flat)
@@ -7,7 +7,7 @@ pub struct Grid {
     pub width: usize,
     pub height: usize,
     pub traits: [Vec<f32>; 9],
-    pub is_empty: Vec<u8>,
+    pub is_empty: BitVec<u64, Lsb0>,
 }
 
 impl Grid {
@@ -26,13 +26,13 @@ impl Grid {
         let mut rng = rand::thread_rng();
         let len = width * height;
         let mut traits: [Vec<f32>; 9] = std::array::from_fn(|_| vec![0.0; len]);
-        let mut is_empty = vec![1u8; len];
+        let mut is_empty = bitvec![u64, Lsb0; 1; len];
 
         for row in 0..height {
             for col in 0..width {
                 let idx = row * width + col;
                 if rng.gen_range(0.0..=1.0) < fill_percentage {
-                    is_empty[idx] = 0;
+                    is_empty.set(idx, false);
                     for t in 0..9 {
                         let (min, max) = trait_ranges[t];
                         traits[t][idx] = rng.gen_range(min..=max);
@@ -75,10 +75,8 @@ impl Grid {
     }
 
     #[inline(always)]
-    pub fn is_cell_empty(&self, row: usize, col: usize) -> u8 {
-        unsafe {
-            *self.is_empty.get_unchecked(self.idx(row, col))
-        }
+    pub fn is_cell_empty(&self, row: usize, col: usize) -> bool {
+        self.is_empty[self.idx(row, col)]
     }
 
     #[inline(always)]
@@ -95,7 +93,7 @@ impl Grid {
     }
 
     #[inline(always)]
-    pub fn is_wrapped_empty(&self, row: isize, col: isize) -> u8 {
+    pub fn is_wrapped_empty(&self, row: isize, col: isize) -> bool {
         let (r, c) = self.get_position(row, col);
         self.is_cell_empty(r, c)
     }
@@ -112,9 +110,7 @@ impl Grid {
     #[inline(always)]
     pub fn set_empty(&mut self, row: usize, col: usize, empty: bool) {
         let pos = self.idx(row, col);
-        unsafe {
-            *self.is_empty.get_unchecked_mut(pos) = empty as u8;
-        }
+        self.is_empty.set(pos, empty);
     }
 
 
@@ -126,7 +122,7 @@ impl Grid {
     }
 
     pub fn count_filled_cells(&self) -> usize {
-        self.is_empty.iter().filter(|&&e| e == 0).count()
+        self.is_empty.count_zeros()
     }
 
     pub fn get_fill_percentage(&self) -> f32 {
@@ -141,7 +137,7 @@ impl Grid {
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
         for i in 0..self.traits[0].len() {
-            if self.is_empty[i] == 0 {
+            if !self.is_empty[i] {
                 for t in 0..9 {
                     self.traits[t][i] = rng.gen_range(0.0..=1.0);
                 }

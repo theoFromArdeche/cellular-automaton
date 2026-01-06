@@ -95,7 +95,12 @@ fn main() {
         is_empty: grid.is_empty.clone(),
     };
 
-    let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
+    // Collect active trait indices once
+    let active_traits: Vec<usize> = active_mask
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
+        .collect();
 
     //print_trait_array(&grid, 0, &trait_names);
 
@@ -103,45 +108,34 @@ fn main() {
     let start = Instant::now();
     for _t in 1..=timesteps {
         let width = grid.width;
-
-        // Process each trait vector in parallel
+        
+        // Process each trait in parallel
         next_grid.traits
             .par_iter_mut()
-            .zip(grid.traits.par_iter())
             .enumerate()
-            .for_each(|(trait_idx, (next_trait_vec, current_trait_vec))| {
-                // Skip inactive traits entirely
-                if active_mask[trait_idx] == 0 {
-                    return;
-                }
-
-                // Process this trait for all cells
-                next_trait_vec
-                    .par_chunks_mut(rows_per_batch * width)
+            .filter(|(idx, _)| active_traits.contains(idx))
+            .for_each(|(trait_idx, next_trait)| {
+                let current = &grid.traits[trait_idx];
+                
+                // Process rows in parallel, use tiling within each row for cache locality
+                next_trait
+                    .par_chunks_mut(width)
                     .enumerate()
-                    .for_each(|(chunk_idx, next_trait_chunk)| {
-                        let start_idx = chunk_idx * rows_per_batch * width;
+                    .for_each(|(row, next_row)| {
+                        let row_offset = row * width;
                         
-                        for i in 0..next_trait_chunk.len() {
-                            let cell_idx = start_idx + i;
+                        // Process in cache-friendly chunks of 64
+                        for chunk_start in (0..width).step_by(64) {
+                            let chunk_end = (chunk_start + 64).min(width);
                             
-                            // Skip empty cells
-                            if grid.is_empty[cell_idx] == 1 {
-                                next_trait_chunk[i] = current_trait_vec[cell_idx];
-                                continue;
+                            for col in chunk_start..chunk_end {
+                                let idx = row_offset + col;
+                                next_row[col] = if grid.is_empty[idx] {
+                                    current[idx]
+                                } else {
+                                    rules_registry.apply_rule(trait_idx, row, col, &neighborhood_traits, &grid)
+                                };
                             }
-                            
-                            let row = cell_idx / width;
-                            let col = cell_idx % width;
-                            
-                            // Apply rule for this trait
-                            next_trait_chunk[i] = rules_registry.apply_rule(
-                                trait_idx,
-                                row,
-                                col,
-                                &neighborhood_traits,
-                                &grid
-                            );
                         }
                     });
             });

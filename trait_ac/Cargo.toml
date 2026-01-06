@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 rand = "0.8"
 rayon = "1.8"
+bitvec = "1.0"
 
 [profile.release]
 opt-level = 3
