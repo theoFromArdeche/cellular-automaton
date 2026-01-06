@@ -4,9 +4,12 @@ use crate::rules::RulesRegistry;
 
 
 /// Print active trait indices with their names
-pub fn print_active_traits(active_traits: &[usize], trait_names: &[String; 9], rules_registry: &RulesRegistry) {
+pub fn print_active_traits(active_mask: &[u8; 9], trait_names: &[String; 9], rules_registry: &RulesRegistry) {
     println!("  Active traits:");
-    for &trait_index in active_traits {
+    for trait_index in 0..9 {
+        if active_mask[trait_index] == 0 {
+            continue;
+        }
         let trait_name = &trait_names[trait_index];
         let rule_name = rules_registry.get_rule_name(trait_index);
         println!("    {}: {} (rule: {})", trait_index, trait_name, rule_name);
@@ -40,20 +43,26 @@ pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String;
 }
 
 /// Print all active trait arrays
-pub fn print_active_traits_array(grid: &Grid, active_traits: &[usize], trait_names: &[String; 9]) {
-    for &trait_index in active_traits {
+pub fn print_active_traits_array(grid: &Grid, active_mask: &[u8; 9], trait_names: &[String; 9]) {
+    for trait_index in 0..9 {
+        if active_mask[trait_index] == 0 {
+            continue;
+        }
         print_trait_array(grid, trait_index, trait_names);
     }
 }
 
 /// Print grid statistics
-pub fn print_statistics(grid: &Grid, active_traits: &[usize]) {
+pub fn print_statistics(grid: &Grid, active_mask: &[u8; 9]) {
     println!("\n=== Grid Statistics ===");
     println!("Grid size: {}x{}", grid.width, grid.height);
     println!("Total cells: {}", grid.width * grid.height);
-    println!("Active traits: {}/9", active_traits.len());
+    println!("Active traits: {}/9", active_mask.iter().sum::<u8>());
 
-    for &trait_index in active_traits {
+    for trait_index in 0..9 {
+        if active_mask[trait_index] == 0 {
+            continue;
+        }
         let values = &grid.traits[trait_index];
 
         let min = values.iter().cloned().fold(f32::INFINITY, f32::min);

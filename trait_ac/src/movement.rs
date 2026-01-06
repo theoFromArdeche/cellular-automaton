@@ -17,82 +17,93 @@ impl Movements {
 
     /// Random walk - move randomly to any valid position in the neighborhood mask
     pub fn random_movement(_cell_r: usize, _cell_c: usize, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
-        let mut valid_moves = [(0isize, 0isize); 9]; // Max 9 positions in 3x3
-        let mut count = 0;
-        
+        let mut valid_moves = Vec::with_capacity(neighborhood_mvt.height * neighborhood_mvt.width);
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
-
+        
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
                 if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {                    
-                    valid_moves[count] = (
+                    valid_moves.push((
                         mask_r as isize - center_row as isize,
                         mask_c as isize - center_col as isize
-                    );
-                    count += 1;
+                    ));
                 }
             }
         }
         
-        if count == 0 {
+        if valid_moves.is_empty() {
             return (0, 0);
         }
         
         let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..count);
-        unsafe { *valid_moves.get_unchecked(idx) }
+        let idx = rng.gen_range(0..valid_moves.len());
+        valid_moves[idx]
     }
 
     /// Move toward the neighbor with the highest trait value (gradient ascent)
+    /// If multiple neighbors have the same highest value, randomly choose one
     pub fn gradient(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
         let current_val = grid.get_cell_trait(cell_r, cell_c, 0);
         let mut best_val = current_val;
-        let mut best_move = (0, 0);
-
+        let mut best_moves = Vec::new();
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
-
+        
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
                 if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
-                   !(mask_r == center_row && mask_c == center_col) {
-
+                    !(mask_r == center_row && mask_c == center_col) {
                     let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
-                
-                    if neighbor_is_empty == 0 && neighbor_value > best_val {
-                        best_val = neighbor_value;
-                        best_move = (
-                            mask_r as isize - center_row as isize,
-                            mask_c as isize - center_col as isize,
-                        );
+                    
+                    if neighbor_is_empty == 0 {
+                        if neighbor_value > best_val {
+                            // Found a new best value - reset the list
+                            best_val = neighbor_value;
+                            best_moves.clear();
+                            best_moves.push((
+                                mask_r as isize - center_row as isize,
+                                mask_c as isize - center_col as isize,
+                            ));
+                        } else if neighbor_value == best_val {
+                            // Found another move with the same best value
+                            best_moves.push((
+                                mask_r as isize - center_row as isize,
+                                mask_c as isize - center_col as isize,
+                            ));
+                        }
                     }
                 }
             }
         }
-
-        best_move
+        
+        if best_moves.is_empty() {
+            return (0, 0);
+        }
+        
+        // Randomly choose one of the best moves
+        let mut rng = rand::thread_rng();
+        let idx = rng.gen_range(0..best_moves.len());
+        best_moves[idx]
     }
 
     /// Move away from high-density areas (gradient descent on density)
     pub fn avoid_crowding(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
         let mut sum = 0.0;
         let mut count = 0;
-
         let center_row = neighborhood_mvt.center_row;
         let center_col = neighborhood_mvt.center_col;
-
+        
         for mask_r in 0..neighborhood_mvt.height {
             for mask_c in 0..neighborhood_mvt.width {
                 if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
-                   !(mask_r == center_row && mask_c == center_col) {
-
+                    !(mask_r == center_row && mask_c == center_col) {
                     let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
                     let neighbor_value = grid.get_cell_trait(grid_r, grid_c, 0);
-                
+                    
                     if neighbor_is_empty == 0 {
                         sum += neighbor_value;
                         count += 1;
@@ -100,137 +111,34 @@ impl Movements {
                 }
             }
         }
-
+        
         if count == 0 {
             return (0, 0);
         }
-
+        
         let avg_density = sum / count as f32;
-
+        
         if avg_density > 0.7 {
-            let mut valid_moves = [(0isize, 0isize); 9];
-            let mut move_count = 0;
+            let mut valid_moves = Vec::with_capacity(neighborhood_mvt.height * neighborhood_mvt.width);
             
             for mask_r in 0..neighborhood_mvt.height {
                 for mask_c in 0..neighborhood_mvt.width {
                     if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {                    
-                        valid_moves[count] = (
+                        valid_moves.push((
                             mask_r as isize - center_row as isize,
                             mask_c as isize - center_col as isize
-                        );
-                        move_count += 1;
+                        ));
                     }
                 }
             }
             
-            if move_count == 0 {
+            if valid_moves.is_empty() {
                 return (0, 0);
             }
             
             let mut rng = rand::thread_rng();
-            let idx = rng.gen_range(0..move_count);
-            unsafe { *valid_moves.get_unchecked(idx) }
-        } else {
-            (0, 0)
-        }
-    }
-
-    /// Chemotaxis - move toward areas with specific trait combinations
-    pub fn chemotaxis(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
-        let target_cell_trait = 2; // Looking for cooperation trait
-        let current_val = grid.get_cell_trait(cell_r, cell_c, target_cell_trait);
-        
-        let mut best_val = current_val;
-        let mut best_move = (0, 0);
-
-        let center_row = neighborhood_mvt.center_row;
-        let center_col = neighborhood_mvt.center_col;
-
-        for mask_r in 0..neighborhood_mvt.height {
-            for mask_c in 0..neighborhood_mvt.width {
-                if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 &&
-                   !(mask_r == center_row && mask_c == center_col) {
-
-                    let (grid_r, grid_c) = neighborhood_mvt.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
-                    let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
-                    let neighbor_value = grid.get_cell_trait(grid_r, grid_c, target_cell_trait);
-                
-                    if neighbor_is_empty == 0 && neighbor_value > best_val {                
-                        best_val = neighbor_value;
-                        best_move = (
-                            mask_r as isize - center_row as isize,
-                            mask_c as isize - center_col as isize,
-                        );
-                    }
-                }
-            }
-        }
-
-        best_move
-    }
-
-    /// Levy flight - occasional long-distance jumps with mostly local movement
-    pub fn levy_flight(_cell_r: usize, _cell_c: usize, neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
-        let mut rng = rand::thread_rng();
-        
-        // 90% local movement, 10% long jump
-        if rng.gen_bool(0.9) {
-            // Local movement
-            Movements::random_movement(_cell_r, _cell_c, neighborhood_mvt, _grid)
-        } else {
-            // Long jump - use full neighborhood extent
-            let mut valid_moves = [(0isize, 0isize); 9];
-            let mut count = 0;
-            
-            let center_row = neighborhood_mvt.center_row;
-            let center_col = neighborhood_mvt.center_col;
-            
-            for mask_r in 0..neighborhood_mvt.height {
-                for mask_c in 0..neighborhood_mvt.width {
-                    if neighborhood_mvt.is_valid(mask_r, mask_c) == 1 {
-                        valid_moves[count] = (
-                            mask_r as isize - center_row as isize,
-                            mask_c as isize - center_col as isize,
-                        );
-                        count += 1;
-                    }
-                }
-            }
-            
-            if count == 0 {
-                return (0, 0);
-            }
-            
-            let idx = rng.gen_range(0..count);
-            unsafe { *valid_moves.get_unchecked(idx) }
-        }
-    }
-
-    /// Multi-trait based movement - considers multiple traits for decision
-    pub fn multi_trait(cell_r: usize, cell_c: usize, neighborhood_mvt: &Neighborhood, grid: &Grid) -> (isize, isize) {
-        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
-        let mobility = grid.get_cell_trait(cell_r, cell_c, 5);
-        let aggression = grid.get_cell_trait(cell_r, cell_c, 3);
-        
-        // High mobility = more likely to move
-        let mut rng = rand::thread_rng();
-        if mobility < 0.3 {
-            return (0, 0); // Low mobility = stay put
-        }
-        
-        // High energy + high aggression = seek highest value neighbor
-        if energy > 0.6 && aggression > 0.6 {
-            return Movements::gradient(cell_r, cell_c, neighborhood_mvt, grid);
-        }
-        
-        // Low energy = avoid crowding
-        if energy < 0.3 {
-            return Movements::avoid_crowding(cell_r, cell_c, neighborhood_mvt, grid);
-        }
-        
-        // Default: weighted random based on mobility
-        if rng.gen_bool(mobility as f64) {
-            Movements::random_movement(cell_r, cell_c, neighborhood_mvt, grid)
+            let idx = rng.gen_range(0..valid_moves.len());
+            valid_moves[idx]
         } else {
             (0, 0)
         }
@@ -342,9 +250,6 @@ static MOVEMENT_LOOKUP: &[(MovementFn, &str)] = &[
     (Movements::random_movement, "random"),
     (Movements::gradient, "gradient"),
     (Movements::avoid_crowding, "avoid crowding"),
-    (Movements::chemotaxis, "chemotaxis"),
-    (Movements::levy_flight, "levy flight"),
-    (Movements::multi_trait, "multi trait"),
     (Movements::social_movement, "social movement"),
     // Add more movements here as needed
 ];
@@ -365,7 +270,6 @@ const fn extract_movement_names<'a, const N: usize>(lookup: &'a [(MovementFn, &'
 static MOVEMENT_NAMES: [&str; MOVEMENT_COUNT] = extract_movement_names::<MOVEMENT_COUNT>(MOVEMENT_LOOKUP);
 
 impl MovementRegistry {
-
     pub fn custom(width: usize, height: usize, movement_function: MovementFn) -> Self {
         let size = width * height;
         Self {
@@ -385,15 +289,14 @@ impl MovementRegistry {
     pub fn prepare(&mut self, width: usize, height: usize) {
         let size = width * height;
         
-        // Resize if grid changed (rare, but safe)
+        // Resize if grid changed
         if self.claims.len() != size {
             self.claims = (0..size).map(|_| AtomicU64::new(0)).collect();
             self.intentions.resize(size, (0, 0));
             self.reserved.resize(size, None);
             self.states.resize(size, ResolveState::Unvisited);
         } else {
-            // Reset values efficiently
-            // Parallel reset is faster for large arrays
+            // Reset values
             self.claims.par_iter().for_each(|x| x.store(0, Ordering::Relaxed));
             self.reserved.par_iter_mut().for_each(|x| *x = None);
             self.states.par_iter_mut().for_each(|x| *x = ResolveState::Unvisited);
@@ -458,10 +361,9 @@ impl MovementRegistry {
         let width = grid.width;
         let len = width * height;
 
-        // 0. Reset workspace
+        // Reset workspace
         self.prepare(width, height);
 
-        // Batch sizing
         let rows_per_batch = std::cmp::max(1, 4000 / width);
         let chunk_len = rows_per_batch * width;
 
@@ -488,7 +390,7 @@ impl MovementRegistry {
                         continue;
                     }
 
-                    // Movement logic (row/col-based)
+                    // Movement logic
                     let (dr, dc) = (self.movement_function)(r, c, neighborhood_mvt, grid);
 
                     let (tr, tc) = (
@@ -754,21 +656,6 @@ mod tests {
         let cell = &grid.cells[1][1];
         let mv = Movements::avoid_crowding(cell, &neighborhood_mvt, &grid);
         assert_eq!(mv, (0, 0), "Avoid crowding should stay put if density is low");
-    }
-
-    #[test]
-    fn test_chemotaxis_moves_toward_target_cell_trait() {
-        let mut grid = build_test_grid();
-        grid.cells[0][0].set_cell_trait(2, 1.0); // Cooperation trait
-        let mask = vec![
-            vec![true, true, true],
-            vec![true, true, true],
-            vec![true, true, true],
-        ];
-        let neighborhood_mvt = Neighborhood::new(3, 3, 1, 1, mask);
-        let cell = &grid.cells[1][1];
-        let mv = Movements::chemotaxis(cell, &neighborhood_mvt, &grid);
-        assert_eq!(mv, (-1, -1), "Chemotaxis should move toward neighbor with higher target trait");
     }
 
     #[test]

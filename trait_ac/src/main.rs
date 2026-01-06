@@ -85,13 +85,7 @@ fn main() {
     println!("Configuration:");
     println!("  Grid: {}x{}", grid_width, grid_height);
     println!("  Timesteps: {}", timesteps);
-    
-    // Print active traits for info
-    let active_traits: Vec<usize> = active_mask.iter()
-        .enumerate()
-        .filter_map(|(i, &active)| if active == 1 { Some(i) } else { None })
-        .collect();
-    print_active_traits(&active_traits, &trait_names, &rules_registry);
+    print_active_traits(&active_mask, &trait_names, &rules_registry);
 
     // Pre-allocate next grid
     let mut next_grid = Grid {
@@ -131,17 +125,16 @@ fn main() {
                         for i in 0..next_trait_chunk.len() {
                             let cell_idx = start_idx + i;
                             
-                            // FAST PATH: Skip empty cells
-                            if grid.is_empty[cell_idx] != 0 {
+                            // Skip empty cells
+                            if grid.is_empty[cell_idx] == 1 {
                                 next_trait_chunk[i] = current_trait_vec[cell_idx];
                                 continue;
                             }
                             
-                            // Calculate position
                             let row = cell_idx / width;
                             let col = cell_idx % width;
                             
-                            // Apply rule only for this trait
+                            // Apply rule for this trait
                             next_trait_chunk[i] = rules_registry.apply_rule(
                                 trait_idx,
                                 row,

@@ -183,7 +183,7 @@ impl Rules {
             }
         }
 
-        (max_val * 0.98).clamp(0.0, 1.0)
+        max_val
     }
 
     /// Minimum of neighbors
@@ -205,7 +205,7 @@ impl Rules {
             }
         }
 
-        min_val.clamp(0.0, 1.0)
+        min_val
     }
 
     /// Weighted average by distance
@@ -244,35 +244,6 @@ impl Rules {
         }
     }
 
-    /// Majority rule (quantized)
-    pub fn majority(trait_index: usize, cell_r: usize, cell_c: usize, neighborhood_traits: &Neighborhood, grid: &Grid) -> f32 {
-        let mut bins = [0u32; 5];
-
-        for mask_r in 0..neighborhood_traits.height {
-            for mask_c in 0..neighborhood_traits.width {
-                if neighborhood_traits.is_valid(mask_r, mask_c) == 1 {
-
-                    let (grid_r, grid_c) = neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
-                    let neighbor_is_empty = grid.is_cell_empty(grid_r, grid_c);
-                    let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
-
-                    if neighbor_is_empty == 0 {
-                        let bin = ((neighbor_value * 5.0).floor() as usize).min(4);
-                        bins[bin] += 1;
-                    }
-                }
-            }
-        }
-
-        let max_bin = bins.iter()
-            .enumerate()
-            .max_by_key(|(_, count)| *count)
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-
-        ((max_bin as f32 + 0.5) / 5.0).clamp(0.0, 1.0)
-    }
-
     /// Energy increases when social needs are met
     /// High-social individuals gain energy near others
     /// Low-social individuals gain energy when alone
@@ -295,8 +266,8 @@ impl Rules {
                 }
             }
         }
-        
-        let density = neighbor_count as f32 / 8.0;  // Assuming 3x3 neighborhood
+        let neighbor_total = neighborhood.height * neighborhood.width - 1;
+        let density = neighbor_count as f32 / neighbor_total as f32;
         
         // Social individuals want density, loners want solitude
         let satisfaction = 1.0 - (social - density).abs();
@@ -359,7 +330,6 @@ static RULE_LOOKUP: &[(RuleFn, &str)] = &[
     (Rules::maximum, "maximum"),
     (Rules::minimum, "minimum"),
     (Rules::weighted_average, "weighted_average"),
-    (Rules::majority, "majority"),
     (Rules::social_energy, "social energy"),
     (Rules::social_influence, "social influence"),
 ];
