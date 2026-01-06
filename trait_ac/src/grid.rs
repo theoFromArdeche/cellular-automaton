@@ -125,13 +125,6 @@ impl Grid {
         std::mem::swap(&mut self.is_empty, &mut new_grid.is_empty);
     }
 
-    /// Get trait values for all cells in row-major order
-    #[inline]
-    pub fn get_cell_trait_array(&self, trait_index: usize) -> Vec<f32> {
-        self.traits[trait_index].clone()
-    }
-
-
     pub fn count_filled_cells(&self) -> usize {
         self.is_empty.iter().filter(|&&e| e == 0).count()
     }

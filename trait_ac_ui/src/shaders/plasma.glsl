@@ -4,7 +4,6 @@ precision highp float;
 in vec2 v_tc;
 out vec4 FragColor;
 uniform sampler2D u_texture;
-uniform float u_base_color;
 
 vec3 plasma(float t) {
     const vec3 c0 = vec3(0.050383, 0.029803, 0.527975);
