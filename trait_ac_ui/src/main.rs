@@ -16,8 +16,8 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
-            .with_title("Cellular Automata Simulator - GPU Accelerated"),
-        renderer: eframe::Renderer::Glow,  // ← IMPORTANT!
+            .with_title("Cellular Automata Simulator"),
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     
@@ -26,7 +26,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             let gl = cc.gl.as_ref().expect("Failed to get glow context").clone();
-            Ok(Box::new(CAApp::new(gl)))  // ← Pass GL context
+            Ok(Box::new(CAApp::new(gl)))  // Pass GL context
         }),
     )
 }
@@ -195,7 +195,7 @@ impl GPURenderer {
         }
     }
     
-    fn paint(&self, scheme: usize, base: f32, rect: egui::Rect, _screen: [f32; 2], 
+    fn paint(&self, scheme: usize, rect: egui::Rect, _screen: [f32; 2], 
             scroll_offset: egui::Vec2, content_size: egui::Vec2) {
         unsafe {
             let gl = &self.gl;
@@ -204,7 +204,6 @@ impl GPURenderer {
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             gl.uniform_1_i32(gl.get_uniform_location(prog, "u_texture").as_ref(), 0);
-            gl.uniform_1_f32(gl.get_uniform_location(prog, "u_base_color").as_ref(), base);
             
             let rect_size = rect.size();
             gl.uniform_2_f32(
@@ -270,10 +269,8 @@ impl GPURenderer {
 struct CAApp {
     // Grid state
     grid: Grid,
-    grid_width: usize, // usefull if the Grid object is reset
-    grid_height: usize,
     grid_density: f32,
-    configuration_traits_ranges: [(f32, f32); 9],
+    initialisation_ranges: [(f32, f32); 9],
     next_grid: Grid,
     
     // Simulation state
@@ -365,7 +362,30 @@ impl CAApp {
         ];
         let initial_selected_trait = 0;
 
-        // Neighborhood mask
+        // range at initialisation for each traits
+        let initialisation_ranges = [ 
+            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+        ];
+
+        // Define trait names
+        let trait_names = semantic_traits_names();
+
+        // Custum rules for each traits
+        let rules: [RuleFn; 9] = [
+                Rules::social_energy, Rules::social_influence, Rules::conway_optimized,
+                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
+                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
+        ];
+        let rules_registry = RulesRegistry::custom(rules);
+
+        let movement_function: MovementFn = Movements::social_movement; 
+        let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
+
+        // Initialize grid
+        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, initialisation_ranges);
+
         let neighborhood_traits_mask = vec![
             vec![1, 1, 1],
             vec![1, 1, 1],
@@ -388,23 +408,6 @@ impl CAApp {
         let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
         let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
 
-        let configuration_traits_ranges = [
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-        ];
-
-        // Initialize grid
-        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, configuration_traits_ranges);
-
-
-        // Default neighborhood
         let neighborhood_traits = Neighborhood::new(
             neighborhood_traits_width,
             neighborhood_traits_height,
@@ -421,20 +424,6 @@ impl CAApp {
             neighborhood_mvt_mask,
         );
 
-        // Define trait names
-        let trait_names = semantic_traits_names();
-
-        // Create custom rule set
-        let rules: [RuleFn; 9] = [
-                Rules::social_energy, Rules::social_influence, Rules::conway_optimized,
-                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-        ];
-        let rules_registry = RulesRegistry::custom(rules);
-
-        let movement_function: MovementFn = Movements::social_movement; 
-        let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
-
         // Pre-allocate next grid
         let next_grid = Grid {
             width: grid.width,
@@ -447,10 +436,8 @@ impl CAApp {
         
         Self {
             grid,
-            grid_width,
-            grid_height,
             grid_density,
-            configuration_traits_ranges,
+            initialisation_ranges,
             next_grid,
 
             timestep: 0,
@@ -497,7 +484,6 @@ impl CAApp {
         }
         let width = self.grid.width;
 
-        // --- OPTIMIZED TRAIT UPDATE ---
         // Process each trait vector in parallel
         self.next_grid.traits
             .par_iter_mut()
@@ -506,7 +492,6 @@ impl CAApp {
             .for_each(|(trait_idx, (next_trait_vec, current_trait_vec))| {
                 // Skip inactive traits entirely
                 if self.active_mask[trait_idx] == 0 {
-                    next_trait_vec.copy_from_slice(current_trait_vec);
                     return;
                 }
 
@@ -542,18 +527,6 @@ impl CAApp {
                     });
             });
 
-        // Update is_empty separately (only once, not per trait)
-        self.next_grid.is_empty
-            .par_chunks_mut(self.rows_per_batch * width)
-            .enumerate()
-            .for_each(|(chunk_idx, next_empty_chunk)| {
-                let start_idx = chunk_idx * self.rows_per_batch * width;
-                for i in 0..next_empty_chunk.len() {
-                    let cell_idx = start_idx + i;
-                    next_empty_chunk[i] = self.grid.is_empty[cell_idx];
-                }
-            });
-
         // --- STEP 2: Movement ---
         self.movement_registry.apply_movement(
             &self.neighborhood_mvt,
@@ -565,14 +538,15 @@ impl CAApp {
     }
     
     fn reset_grid(&mut self) {
-        self.grid = Grid::new_with_density(self.grid_width, self.grid_height, self.grid_density, self.configuration_traits_ranges);
+        self.grid = Grid::new_with_density(self.grid.width, self.grid.height, self.grid_density, self.initialisation_ranges);
+        self.movement_registry.prepare(self.grid.width, self.grid.height);
         self.next_grid =  Grid {
             width: self.grid.width,
             height: self.grid.height,
             traits: self.grid.traits.clone(),
             is_empty: self.grid.is_empty.clone(),
         };
-        self.rows_per_batch = std::cmp::max(1, 4000 / self.grid_width);
+        self.rows_per_batch = std::cmp::max(1, 4000 / self.grid.width);
         self.timestep = 0;
         self.time_accumulator = 0.0;
     }
@@ -591,29 +565,23 @@ impl CAApp {
             }
         }
         
-        let len = self.grid_width * self.grid_height;
+        let len = self.grid.width * self.grid.height;
         let resize_flag = self.grayscale_buffer.len() != len;
         if  resize_flag {
             self.grayscale_buffer.resize(len, 0);
         }
         
         self.grayscale_buffer
-            .par_chunks_mut(self.grid_width)
+            .par_chunks_mut(self.grid.width)
             .enumerate()
             .for_each(|(row, pixels)| {
-                let start = row * self.grid_width;
-                // The compiler can now auto-vectorize this loop (process 8 or 16 pixels at once)
+                let start = row * self.grid.width;
                 for (col, pixel) in pixels.iter_mut().enumerate() {
                     let idx = start + col;
-                    
-                    // Assume is_empty is 1 for empty, 0 for full.
-                    // If is_empty is 0, mask becomes 1. If is_empty is 1, mask becomes 0.
-                    // Note: Adjust logic based on your actual data types (bool vs u8)
                     let is_not_empty = (self.grid.is_empty[idx] == 0) as u8;
                     let trait_val = self.grid.traits[self.selected_trait][idx];
                     let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
 
-                    // Multiply by mask. 
                     *pixel = offset_val * is_not_empty;
                 }
             });
@@ -622,8 +590,8 @@ impl CAApp {
         if let Ok(mut guard) = self.gpu_renderer.lock() {
             if let Some(ref mut r) = *guard {
                 r.update_texture(
-                    self.grid_width,
-                    self.grid_height,
+                    self.grid.width,
+                    self.grid.height,
                     &self.grayscale_buffer,
                     resize_flag,
                 );
@@ -647,7 +615,7 @@ impl eframe::App for CAApp {
             self.timed_simulation = false; // to avoid printing multiple times
 
             println!("Configuration:");
-            println!("  Grid: {}x{}", self.grid_width, self.grid_height);
+            println!("  Grid: {}x{}", self.grid.width, self.grid.height);
             println!("  Timesteps: {}", self.timestep);
             
             // Print active traits for info
@@ -665,7 +633,7 @@ impl eframe::App for CAApp {
             );
             println!(
                 "Cells/sec: {:.2}M",
-                (self.grid_width * self.grid_height * self.timestep) as f64 / elapsed.as_secs_f64() / 1_000_000.0
+                (self.grid.width * self.grid.height * self.timestep) as f64 / elapsed.as_secs_f64() / 1_000_000.0
             );
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
@@ -749,9 +717,9 @@ impl eframe::App for CAApp {
             // Grid size
             ui.label("Grid Configuration");
             let mut changed = false;
-            changed |= ui.add(egui::Slider::new(&mut self.grid_width, self.grid_width_min..=self.grid_width_max)
+            changed |= ui.add(egui::Slider::new(&mut self.grid.width, self.grid_width_min..=self.grid_width_max)
                 .text("Width")).changed();
-            changed |= ui.add(egui::Slider::new(&mut self.grid_height, self.grid_height_min..=self.grid_height_max)
+            changed |= ui.add(egui::Slider::new(&mut self.grid.height, self.grid_height_min..=self.grid_height_max)
                 .text("Height")).changed();
             changed |= ui.add(egui::Slider::new(&mut self.grid_density, 0.01..=1.0)
                 .text("Density")).changed();
@@ -904,7 +872,7 @@ impl eframe::App for CAApp {
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
 
-                    // --- Trait Statistics (scrollable only if too long) ---
+                    // --- Trait Statistics ---
                     ui.label("Trait Statistics");
                     egui::ScrollArea::vertical()
                         .max_height(300.0) // adjust as needed
@@ -915,7 +883,7 @@ impl eframe::App for CAApp {
                                     continue;
                                 }
 
-                                let values = self.grid.get_cell_trait_array(trait_idx);
+                                let values = &self.grid.traits[trait_idx];
 
                                 let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
                                 let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -946,8 +914,8 @@ impl eframe::App for CAApp {
 
             // Calculate content size (logical size of the entire grid)
             let content_size = egui::vec2(
-                self.grid_width as f32 * self.cell_size,
-                self.grid_height as f32 * self.cell_size,
+                self.grid.width as f32 * self.cell_size,
+                self.grid.height as f32 * self.cell_size,
             );
 
             // ScrollArea configuration
@@ -976,7 +944,6 @@ impl eframe::App for CAApp {
             let screen = ctx.screen_rect().size();
             let screen_arr = [screen.x, screen.y];
             let scheme = self.color_scheme.to_index();
-            let base = self.base_color_no_actor;
             let renderer = self.gpu_renderer.clone();
             
             let cb = egui::PaintCallback {
@@ -985,7 +952,7 @@ impl eframe::App for CAApp {
                     move |_info, _painter| {
                         if let Ok(guard) = renderer.lock() {
                             if let Some(ref r) = *guard {
-                                r.paint(scheme, base, viewport_rect, screen_arr, 
+                                r.paint(scheme, viewport_rect, screen_arr, 
                                     current_scroll, content_size);
                             }
                         }
@@ -1002,7 +969,7 @@ impl eframe::App for CAApp {
             // Draw values on top if zoomed in enough
             if self.show_values && self.cell_size >= self.show_values_minimum_cell_size {
                 let painter = ui.painter();
-                let values = self.grid.get_cell_trait_array(self.selected_trait);
+                let values = &self.grid.traits[self.selected_trait];
 
                 // Calculate visible cell range based on scroll offset
                 let scroll_offset = scroll_output.state.offset;
@@ -1011,11 +978,11 @@ impl eframe::App for CAApp {
                 let start_row = (scroll_offset.y / self.cell_size).floor() as usize;
                 let visible_cols = (viewport_rect.width() / self.cell_size).ceil() as usize + 1;
                 let visible_rows = (viewport_rect.height() / self.cell_size).ceil() as usize + 1;
-                let end_col = (start_col + visible_cols).min(self.grid_width);
-                let end_row = (start_row + visible_rows).min(self.grid_height);
+                let end_col = (start_col + visible_cols).min(self.grid.width);
+                let end_row = (start_row + visible_rows).min(self.grid.height);
 
                 // Capture needed values to avoid borrowing issues
-                let grid_width = self.grid_width;
+                let grid_width = self.grid.width;
                 let cell_size = self.cell_size;
 
                 // Create index pairs for only visible cells
@@ -1071,7 +1038,7 @@ impl eframe::App for CAApp {
                     painter.text(
                         pos,
                         egui::Align2::CENTER_CENTER,
-                        format!("{:.1}", value),
+                        format!("{:.2}", value),
                         egui::FontId::proportional(font_size),
                         text_color,
                     );
@@ -1137,8 +1104,8 @@ impl eframe::App for CAApp {
                         let mut new_offset = new_world_pos - rel;
 
                         let content_size = egui::vec2(
-                            self.grid_width as f32 * self.cell_size,
-                            self.grid_height as f32 * self.cell_size,
+                            self.grid.width as f32 * self.cell_size,
+                            self.grid.height as f32 * self.cell_size,
                         );
                         let visible_size = viewport_rect.size();
 

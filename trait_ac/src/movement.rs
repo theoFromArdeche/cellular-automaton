@@ -318,9 +318,8 @@ impl Movements {
 #[derive(Clone, Copy, PartialEq)]
 enum ResolveState {
     Unvisited,
-    Visiting,
     Empty,
-    Resolved(bool),
+    Visited,
 }
 
 pub type MovementFn = fn(usize, usize, &Neighborhood, &Grid) -> (isize, isize);
@@ -469,7 +468,7 @@ impl MovementRegistry {
         // --- Phase 1: Parallel Bidding ---
         self.intentions
             .par_chunks_mut(chunk_len)
-            .zip(grid.is_empty.par_chunks(chunk_len))
+            .zip(next_grid.is_empty.par_chunks(chunk_len)) // the is_empty is never changed on the temp grid (here "grid")
             .enumerate()
             .for_each(|(batch_idx, (intent_chunk, empty_chunk))| {
                 let mut rng = rand::thread_rng();
@@ -484,10 +483,8 @@ impl MovementRegistry {
                     let r = global_idx / width;
                     let c = global_idx % width;
 
-                    // Default: stay
-                    intent_chunk[i] = (r as u16, c as u16);
-
-                    if empty_chunk[i] != 0 {
+                    // skip empty cells
+                    if empty_chunk[i] == 1 {
                         continue;
                     }
 
@@ -498,8 +495,9 @@ impl MovementRegistry {
                         ((r as isize + dr).clamp(0, height as isize - 1)) as usize,
                         ((c as isize + dc).clamp(0, width as isize - 1)) as usize,
                     );
+                    intent_chunk[i] = (tr as u16, tc as u16);
 
-                    if (tr, tc) != (r, c) {
+                    if (tr, tc) != (r, c) { // (tr, tc) == (r, c) is not in bid because its managed in step 3 (it always has priority)
                         let target_flat = tr * width + tc;
                         let priority: u32 = rng.next_u32();
                         let bid = ((priority as u64) << 32) | (global_idx as u64);
@@ -509,8 +507,6 @@ impl MovementRegistry {
                                 .get_unchecked(target_flat)
                                 .fetch_max(bid, Ordering::Relaxed);
                         }
-
-                        intent_chunk[i] = (tr as u16, tc as u16);
                     }
                 }
             });
@@ -548,11 +544,32 @@ impl MovementRegistry {
             });
 
         // --- Phase 3: Resolve (DFS) ---
-        for idx in 0..len {
-            if grid.is_empty[idx] != 0 {
-                self.states[idx] = ResolveState::Empty;
+        for r in 0..height {
+            for c in 0..width {
+                let idx = r * width + c;
+
+                // We don't want to visit empty cells
+                if next_grid.is_empty[idx] == 1 {
+                    self.states[idx] = ResolveState::Empty;
+                    continue;
+                }
+
+                let (tr_u16, tc_u16) = self.intentions[idx];
+                let tr = tr_u16 as usize;
+                let tc = tc_u16 as usize;
+                let target_idx = tr * width + tc;
+
+                //print!("({},{}), ", tr, tc);
+
+                // cells that stays have the priority
+                if target_idx == idx {
+                    self.reserved[idx] = Some((r as u16, c as u16));
+                    self.states[idx] = ResolveState::Visited;
+                }
             }
+            //println!("");
         }
+        //println!("");
 
         for r in 0..height {
             for c in 0..width {
@@ -564,31 +581,16 @@ impl MovementRegistry {
         }
 
         // --- Phase 4: Construct next grid ---
-        // Update is_empty first (independent of traits)
         next_grid
             .is_empty
             .par_iter_mut()
             .enumerate()
             .for_each(|(idx, out_empty)| {
-                if grid.is_empty[idx] != 0 {
-                    *out_empty = match self.reserved[idx] {
-                        Some(_) => 0,
-                        None => 1,
-                    };
-                    return;
-                }
-                
-                match self.states[idx] {
-                    ResolveState::Resolved(true) => {
-                        *out_empty = match self.reserved[idx] {
-                            Some(_) => 0,
-                            None => 1,
-                        };
-                    }
-                    _ => {
-                        *out_empty = 0;
-                    }
-                }
+                // check if reserved
+                *out_empty = match self.reserved[idx] {
+                    Some(_) => 0,
+                    None => 1, // the cell will be empty
+                };
             });
 
         // Update all traits in parallel (one pass per trait)
@@ -601,80 +603,72 @@ impl MovementRegistry {
                     .par_iter_mut()
                     .enumerate()
                     .for_each(|(idx, out_trait_val)| {
-                        if grid.is_empty[idx] != 0 {
-                            *out_trait_val = match self.reserved[idx] {
-                                Some((sr, sc)) => {
-                                    let src_idx = sr as usize * width + sc as usize;
-                                    grid.traits[trait_idx][src_idx]
-                                }
-                                None => grid.traits[trait_idx][idx],
-                            };
-                            return;
-                        }
-                        
-                        match self.states[idx] {
-                            ResolveState::Resolved(true) => {
-                                *out_trait_val = match self.reserved[idx] {
-                                    Some((sr, sc)) => {
-                                        let src_idx = sr as usize * width + sc as usize;
-                                        grid.traits[trait_idx][src_idx]
-                                    }
-                                    None => grid.traits[trait_idx][idx],
-                                };
+                        // check if reserved or not
+                        *out_trait_val = match self.reserved[idx] {
+                            Some((sr, sc)) => {
+                                let src_idx = sr as usize * width + sc as usize;
+                                grid.traits[trait_idx][src_idx]
                             }
-                            _ => {
-                                *out_trait_val = grid.traits[trait_idx][idx];
-                            }
-                        }
+                            None => 0.0, // the cell will be empty
+                        };
                     });
             });
     }
 
 
     // Optimized DFS for flat buffers
-    pub fn resolve_move(&mut self, r: usize, c: usize, w: usize) -> bool {
+    pub fn resolve_move(&mut self, r: usize, c: usize, w: usize) {
         let idx = r * w + c;
 
-        match self.states[idx] {
-            ResolveState::Resolved(res) => return res,
-            ResolveState::Visiting => return true,
-            _ => {}
+        // loop 
+        // (the only possible loop is a circle (end is start, start is end)
+        // (because a cell has a maximum of 1 individual (that is not already in the cell) that want this cell)
+        if self.states[idx] == ResolveState::Visited {
+            return
         }
 
-        self.states[idx] = ResolveState::Visiting;
+        self.states[idx] = ResolveState::Visited;
 
         let (tr_u16, tc_u16) = self.intentions[idx];
         let tr = tr_u16 as usize;
         let tc = tc_u16 as usize;
         let target_idx = tr * w + tc;
 
-        if target_idx == idx {
-            self.reserved[idx] = Some((r as u16, c as u16));
-            self.states[idx] = ResolveState::Resolved(true);
-            return true;
-        }
+        //println!("intention ({}, {}) -> ({}, {})", r, c, tr, tc);
 
         if self.reserved[target_idx].is_some() {
-            self.states[idx] = ResolveState::Resolved(false);
-            return false;
+            // we can't go because its already reserved so we stay in place
+            // (because of the tie breaker of phase 2, the target is reserved only if the individual inside it does not move,
+            // ties in resolve_move are only between an individual that want to move and an individual that want to stay)
+            self.reserved[idx] = Some((r as u16, c as u16));
+            //println!("reserved ({}, {}) -> ({}, {})", r, c, r, c);
+            return;
         }
-
-        self.reserved[target_idx] = Some((r as u16, c as u16));
 
         if self.states[target_idx] == ResolveState::Empty {
-            self.states[idx] = ResolveState::Resolved(true);
-            return true;
+            // we can go
+            self.reserved[target_idx] = Some((r as u16, c as u16));
+            //println!("empty ({}, {}) -> ({}, {})", r, c, tr, tc);
+            return;
         }
 
-        let occupant_can_move = self.resolve_move(tr, tc, w);
+        // the target cell has an individual inside it
+        // so we need to check if the individual will move or not
 
-        let (occ_tr, occ_tc) = self.intentions[target_idx];
-        let occupant_vacating =
-            occupant_can_move && (occ_tr as usize * w + occ_tc as usize != target_idx);
+        // propagate
+        self.resolve_move(tr, tc, w); 
+        // (tr, tc) != (r, c) because cells that want to stay as their first wish because resolve_move
+        // are set to Visited earlier in step 3
 
-        let result = occupant_vacating;
-        self.states[idx] = ResolveState::Resolved(result);
-        result
+        if self.reserved[target_idx].is_some() {
+            // we can't go
+            self.reserved[idx] = Some((r as u16, c as u16));
+            //println!("staying ({}, {}) -> ({}, {})", r, c, r, c);
+        } else {
+            // we can go
+            self.reserved[target_idx] = Some((r as u16, c as u16));
+            //println!("going to target ({}, {}) -> ({}, {})", r, c, tr, tc);
+        }
     }
 }
 
