@@ -6,47 +6,64 @@ use bitvec::prelude::*;
 pub struct Grid {
     pub width: usize,
     pub height: usize,
-    pub traits: [Vec<f32>; 9],
+    pub num_cells: usize,
+    /// Single contiguous allocation: [trait0..., trait1..., ..., trait8...]
+    pub data: Vec<f32>,
     pub is_empty: BitVec<u64, Lsb0>,
 }
 
 impl Grid {
+    pub const NUM_TRAITS: usize = 9;
+
     /// Create a new grid with random cells
     pub fn new(width: usize, height: usize) -> Self {
-        Self::new_with_density(width, height, 1.0, [(0.0, 1.0); 9])
+        Self::new_with_density(width, height, 1.0, [(0.0, 1.0); Self::NUM_TRAITS])
     }
 
     pub fn new_with_density(width: usize,
                             height: usize,
                             fill_percentage: f32,
-                            trait_ranges: [(f32, f32); 9],  // (min, max) for each trait
+                            trait_ranges: [(f32, f32); Self::NUM_TRAITS],  // (min, max) for each trait
                             ) -> Self {
 
         let fill_percentage = fill_percentage.clamp(0.0, 1.0);
         let mut rng = rand::thread_rng();
-        let len = width * height;
-        let mut traits: [Vec<f32>; 9] = std::array::from_fn(|_| vec![0.0; len]);
-        let mut is_empty = bitvec![u64, Lsb0; 1; len];
-
-        for row in 0..height {
-            for col in 0..width {
-                let idx = row * width + col;
-                if rng.gen_range(0.0..=1.0) < fill_percentage {
-                    is_empty.set(idx, false);
-                    for t in 0..9 {
-                        let (min, max) = trait_ranges[t];
-                        traits[t][idx] = rng.gen_range(min..=max);
-                    }
+        let num_cells = width * height;
+        
+        // Single allocation for all traits
+        let mut data = vec![0.0; num_cells * Self::NUM_TRAITS];
+        let mut is_empty = bitvec![u64, Lsb0; 1; num_cells]; // Start all empty
+        
+        for idx in 0..num_cells {
+            if rng.gen_range(0.0..=1.0) < fill_percentage {
+                is_empty.set(idx, false); // Mark as filled
+                
+                for t in 0..Self::NUM_TRAITS {
+                    let (min, max) = trait_ranges[t];
+                    data[t * num_cells + idx] = rng.gen_range(min..=max);
                 }
             }
         }
-
+        
         Self {
             width,
             height,
-            traits,
+            num_cells,
+            data,
             is_empty,
         }
+    }
+
+    #[inline(always)]
+    pub fn get_trait_slice(&self, trait_idx: usize) -> &[f32] {
+        let start = trait_idx * self.num_cells;
+        &self.data[start..start + self.num_cells]
+    }
+    
+    #[inline(always)]
+    pub fn get_trait_slice_mut(&mut self, trait_idx: usize) -> &mut [f32] {
+        let start = trait_idx * self.num_cells;
+        &mut self.data[start..start + self.num_cells]
     }
 
 
@@ -82,42 +99,23 @@ impl Grid {
     #[inline(always)]
     pub fn get_cell_trait(&self, row: usize, col: usize, trait_idx: usize) -> f32 {
         unsafe {
-            *self.traits[trait_idx].get_unchecked(self.idx(row, col))
+            *self.data.get_unchecked(trait_idx * self.num_cells + self.idx(row, col))
         }
     }
-
-    #[inline(always)]
-    pub fn get_wrapped_cell_trait( &self, row: isize, col: isize, trait_idx: usize) -> f32 {
-        let (r, c) = self.get_position(row, col);
-        self.get_cell_trait(r, c, trait_idx)
-    }
-
-    #[inline(always)]
-    pub fn is_wrapped_empty(&self, row: isize, col: isize) -> bool {
-        let (r, c) = self.get_position(row, col);
-        self.is_cell_empty(r, c)
-    }
-
 
     #[inline(always)]
     pub fn set_cell_trait(&mut self, row: usize, col: usize, trait_idx: usize, value: f32) {
         let pos = self.idx(row, col);
         unsafe {
-            *self.traits[trait_idx].get_unchecked_mut(pos) = value;
+            *self.data.get_unchecked_mut(trait_idx * self.num_cells + pos) = value;
         }
-    }
-
-    #[inline(always)]
-    pub fn set_empty(&mut self, row: usize, col: usize, empty: bool) {
-        let pos = self.idx(row, col);
-        self.is_empty.set(pos, empty);
     }
 
 
     /// Fast update that swaps the internal vector (avoids reallocation)
     #[inline(always)]
     pub fn update_grid(&mut self, new_grid: &mut Grid) {
-        std::mem::swap(&mut self.traits, &mut new_grid.traits);
+        std::mem::swap(&mut self.data, &mut new_grid.data);
         std::mem::swap(&mut self.is_empty, &mut new_grid.is_empty);
     }
 
@@ -136,10 +134,13 @@ impl Grid {
 
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
-        for i in 0..self.traits[0].len() {
-            if !self.is_empty[i] {
-                for t in 0..9 {
-                    self.traits[t][i] = rng.gen_range(0.0..=1.0);
+        
+        for r in 0..self.width {
+            for c in 0..self.height {
+                if !self.is_cell_empty(r, c) {  // false = filled
+                    for t in 0..Self::NUM_TRAITS {
+                        self.set_cell_trait(r, c, t, rng.gen_range(0.0..=1.0));
+                    }
                 }
             }
         }
@@ -159,7 +160,7 @@ mod tests {
         let grid = Grid::new(5, 5);
         assert_eq!(grid.width, 5);
         assert_eq!(grid.height, 5);
-        assert_eq!(grid.traits.len(), 5*5);
+        assert_eq!(grid.data.len(), 5*5*Self::NUM_TRAITS);
     }
 
     #[test]

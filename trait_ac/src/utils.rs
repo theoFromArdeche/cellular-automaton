@@ -18,7 +18,7 @@ pub fn print_active_traits(active_mask: &[u8; 9], trait_names: &[String; 9], rul
 
 /// Print a single trait array in row-major order
 pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String; 9]) {
-    let values = &grid.traits[trait_index];
+    let values = grid.get_trait_slice(trait_index);
     
     println!("\n=== Trait {} ({}) ===", trait_index, trait_names[trait_index]);
     println!("[");
@@ -63,7 +63,7 @@ pub fn print_statistics(grid: &Grid, active_mask: &[u8; 9]) {
         if active_mask[trait_index] == 0 {
             continue;
         }
-        let values = &grid.traits[trait_index];
+        let values = grid.get_trait_slice(trait_index);
 
         let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
         let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);

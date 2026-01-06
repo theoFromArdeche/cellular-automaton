@@ -501,26 +501,26 @@ impl MovementRegistry {
             });
         
 
-        // Update all traits in parallel (one pass per trait)
-        next_grid
-            .traits
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(trait_idx, out_trait_vec)| {
-                out_trait_vec
-                    .par_iter_mut()
-                    .enumerate()
-                    .for_each(|(idx, out_trait_val)| {
-                        // check if reserved or not
-                        *out_trait_val = match self.reserved[idx] {
-                            Some((sr, sc)) => {
-                                let src_idx = sr as usize * width + sc as usize;
-                                grid.traits[trait_idx][src_idx]
-                            }
-                            None => 0.0, // the cell will be empty
-                        };
-                    });
-            });
+        let width = grid.width;
+
+        // Collect results first, then apply
+        for trait_idx in 0..Grid::NUM_TRAITS {
+            let current = grid.get_trait_slice(trait_idx);
+            let out_trait = next_grid.get_trait_slice_mut(trait_idx);
+            
+            out_trait
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(idx, out_trait_val)| {
+                    *out_trait_val = match self.reserved[idx] {
+                        Some((sr, sc)) => {
+                            let src_idx = sr as usize * width + sc as usize;
+                            current[src_idx]
+                        }
+                        None => 0.0,
+                    };
+                });
+        }
     }
 
 
@@ -595,7 +595,7 @@ mod tests {
         for r in 0..3 {
             for c in 0..3 {
                 for index in 0..9 {
-                    grid.cells[r][c].set_cell_trait(index, 0.5);
+                    grid.set_cell_trait(r, c, index, 0.5);
                 }
             }
         }
@@ -638,7 +638,7 @@ mod tests {
     fn test_gradient_moves_toward_highest_trait() {
         let mut grid = build_test_grid();
         // Set a neighbor with higher trait
-        grid.cells[0][1].set_cell_trait(0, 0.9);
+        grid.set_cell_trait(0, 1, 0, 0.9);
         let mask = vec![
             vec![true, true, true],
             vec![true, true, true],

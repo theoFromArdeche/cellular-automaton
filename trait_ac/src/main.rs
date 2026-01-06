@@ -91,7 +91,8 @@ fn main() {
     let mut next_grid = Grid {
         width: grid.width,
         height: grid.height,
-        traits: grid.traits.clone(),
+        num_cells: grid.num_cells,
+        data: grid.data.clone(),
         is_empty: grid.is_empty.clone(),
     };
 
@@ -108,37 +109,34 @@ fn main() {
     let start = Instant::now();
     for _t in 1..=timesteps {
         let width = grid.width;
-        
-        // Process each trait in parallel
-        next_grid.traits
-            .par_iter_mut()
-            .enumerate()
-            .filter(|(idx, _)| active_traits.contains(idx))
-            .for_each(|(trait_idx, next_trait)| {
-                let current = &grid.traits[trait_idx];
-                
-                // Process rows in parallel, use tiling within each row for cache locality
-                next_trait
-                    .par_chunks_mut(width)
-                    .enumerate()
-                    .for_each(|(row, next_row)| {
-                        let row_offset = row * width;
+    
+        // Sequential over active traits (small number), parallel over rows
+        for &trait_idx in &active_traits {
+            let current = grid.get_trait_slice(trait_idx);
+            let next_trait = next_grid.get_trait_slice_mut(trait_idx);
+            
+            // Process rows in parallel
+            next_trait
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each(|(row, next_row)| {
+                    let row_offset = row * width;
+                    
+                    // Process in cache-friendly chunks of 64
+                    for chunk_start in (0..width).step_by(64) {
+                        let chunk_end = (chunk_start + 64).min(width);
                         
-                        // Process in cache-friendly chunks of 64
-                        for chunk_start in (0..width).step_by(64) {
-                            let chunk_end = (chunk_start + 64).min(width);
-                            
-                            for col in chunk_start..chunk_end {
-                                let idx = row_offset + col;
-                                next_row[col] = if grid.is_empty[idx] {
-                                    current[idx]
-                                } else {
-                                    rules_registry.apply_rule(trait_idx, row, col, &neighborhood_traits, &grid)
-                                };
-                            }
+                        for col in chunk_start..chunk_end {
+                            let idx = row_offset + col;
+                            next_row[col] = if grid.is_empty[idx] {
+                                current[idx]
+                            } else {
+                                rules_registry.apply_rule(trait_idx, row, col, &neighborhood_traits, &grid)
+                            };
                         }
-                    });
-            });
+                    }
+                });
+        }
 
         // --- STEP 2: Movement ---
         movement_registry.apply_movement(
