@@ -1,0 +1,74 @@
+# Grid settings
+grid_width = 500
+grid_height = 500
+grid_density = 0.5
+num_traits = 9
+
+
+# Simulation timing
+steps_per_second = 1000.0
+timed_simulation = false
+timestep_max = 100
+
+
+# Grid bounds
+grid_width_min = 3
+grid_width_max = 5000
+grid_height_min = 3
+grid_height_max = 5000
+
+
+# Steps per second bounds
+steps_per_second_min = 1.0
+steps_per_second_max = 10000.0
+
+
+# Cell display
+cell_size = 1.0
+cell_size_min = 0.1
+cell_size_max = 100.0
+
+
+# Value display
+show_values = false
+show_values_minimum_cell_size = 20.0
+
+
+# Colors
+color_scheme = "viridis"
+base_color_no_actor = 0.0
+
+
+# Trait settings
+active_mask = [1, 1, 0, 0, 0, 0, 0, 0, 0]
+initial_selected_trait = 0
+
+initialisation_ranges = [
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+]
+
+
+# Rules & movement
+rules = [
+    "social energy", "social influence", "conway optimized",
+    "conway optimized", "conway optimized", "conway optimized",
+    "conway optimized", "conway optimized", "conway optimized",
+]
+
+movement = "social movement"
+
+
+# Neighborhood masks
+neighborhood_traits_mask = [
+    [1, 1, 1],
+    [1, 1, 1],
+    [1, 1, 1],
+]
+
+neighborhood_mvt_mask = [
+    [1, 1, 1],
+    [1, 1, 1],
+    [1, 1, 1],
+]

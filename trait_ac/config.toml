@@ -1,0 +1,44 @@
+# Grid settings
+grid_width = 3000
+grid_height = 3000
+grid_density = 1.0
+
+
+# Simulation duration
+timesteps = 100
+
+
+# Trait settings
+num_traits = 1
+active_mask = [
+    1, 0, 0,
+    0, 0, 0,
+    0, 0, 0,
+]
+initialisation_ranges = [
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+    [0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+]
+
+
+# Rules & movement
+rules = [
+    "conway optimized", "conway optimized", "conway optimized",
+    "conway optimized", "conway optimized", "conway optimized",
+    "conway optimized", "conway optimized", "conway optimized",
+]
+movement = "static"
+
+
+# Neighborhood masks
+neighborhood_traits_mask = [
+    [1, 1, 1],
+    [1, 1, 1],
+    [1, 1, 1],
+]
+neighborhood_mvt_mask = [
+    [1, 1, 1],
+    [1, 1, 1],
+    [1, 1, 1],
+]

@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rand::prelude::*;
 
 
-pub struct Movements;
+pub struct MovementFunction;
 
-impl Movements {
+impl MovementFunction {
     /// No movement - cells stay in place
     #[inline(always)]
     pub fn static_movement(_cell_r: usize, _cell_c: usize, _neighborhood_mvt: &Neighborhood, _grid: &Grid) -> (isize, isize) {
@@ -220,7 +220,54 @@ impl Movements {
 
 
 
+macro_rules! define_movements {
+    ($(($variant:ident, $name:expr, $func:path)),* $(,)?) => {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub enum Movement {
+            $($variant),*
+        }
+        
+        impl Movement {
+            pub const ALL: &'static [Movement] = &[$(Movement::$variant),*];
+            pub const NAMES: &'static [&'static str] = &[$($name),*];
+            
+            #[inline]
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(Movement::$variant => $name),*
+                }
+            }
+            
+            #[inline]
+            pub fn from_name(name: &str) -> Option<Movement> {
+                match name {
+                    $($name => Some(Movement::$variant)),*,
+                    _ => None,
+                }
+            }
+            
+            #[inline]
+            pub fn get_fn(&self) -> MovementFnType {
+                match self {
+                    $(Movement::$variant => $func),*
+                }
+            }
+        }
+    };
+}
 
+// ============================================================
+// ADD NEW MOVEMENTS HERE - Just add one line!
+// Format: (EnumVariant, "display name", MovementFunction::function_name)
+// ============================================================
+define_movements!(
+    (Static,        "static",          MovementFunction::static_movement),
+    (Random,        "random",          MovementFunction::random_movement),
+    (Gradient,      "gradient",        MovementFunction::gradient),
+    (AvoidCrowding, "avoid crowding",  MovementFunction::avoid_crowding),
+    (Social,        "social movement", MovementFunction::social_movement),
+    // Add new movements here:
+);
 
 #[derive(Clone, Copy, PartialEq)]
 enum ResolveState {
@@ -229,119 +276,95 @@ enum ResolveState {
     Visited,
 }
 
-pub type MovementFn = fn(usize, usize, &Neighborhood, &Grid) -> (isize, isize);
+pub type MovementFnType = fn(usize, usize, &Neighborhood, &Grid) -> (isize, isize);
 
 pub struct MovementRegistry {
-    pub movement_function: MovementFn,
+    pub movement_function: MovementFnType,
+    movement: Movement,
     // Stores bids: High 32 bits = Priority, Low 32 bits = Source Index
-    claims: Vec<AtomicU64>, 
+    claims: Vec<AtomicU64>,
     // Stores target (r, c) for every cell. Flattened index = r * width + c
-    intentions: Vec<(u16, u16)>, 
+    intentions: Vec<(u16, u16)>,
     // DFS helper: Flattened
     reserved: Vec<Option<(u16, u16)>>,
     // DFS helper: Flattened
     states: Vec<ResolveState>,
 }
 
-// Static lookup table for function pointer to name mapping
-static MOVEMENT_LOOKUP: &[(MovementFn, &str)] = &[
-    (Movements::static_movement, "static"),
-    (Movements::random_movement, "random"),
-    (Movements::gradient, "gradient"),
-    (Movements::avoid_crowding, "avoid crowding"),
-    (Movements::social_movement, "social movement"),
-    // Add more movements here as needed
-];
-
-const MOVEMENT_COUNT: usize = MOVEMENT_LOOKUP.len();
-
-const fn extract_movement_names<'a, const N: usize>(lookup: &'a [(MovementFn, &'a str)]) -> [&'a str; N] {
-    let mut names = [""; N];
-    let mut i = 0;
-    while i < N {
-        names[i] = lookup[i].1;
-        i += 1;
-    }
-    names
-}
-
-// Static array of just the names, extracted from lookup table
-static MOVEMENT_NAMES: [&str; MOVEMENT_COUNT] = extract_movement_names::<MOVEMENT_COUNT>(MOVEMENT_LOOKUP);
-
 impl MovementRegistry {
-    pub fn custom(width: usize, height: usize, movement_function: MovementFn) -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self::custom(width, height, Movement::Static)
+    }
+    
+    pub fn custom(width: usize, height: usize, movement: Movement) -> Self {
         let size = width * height;
         Self {
-            movement_function: movement_function,
+            movement_function: movement.get_fn(),
+            movement,
             claims: (0..size).map(|_| AtomicU64::new(0)).collect(),
             intentions: vec![(0, 0); size],
             reserved: vec![None; size],
             states: vec![ResolveState::Unvisited; size],
         }
     }
-
-    pub fn new(width: usize, height: usize) -> Self {
-        MovementRegistry::custom(width, height, Movements::static_movement)
-    }
-
+    
     // Fast reset without deallocating
     pub fn prepare(&mut self, width: usize, height: usize) {
         let size = width * height;
         
-        // Resize if grid changed
         if self.claims.len() != size {
             self.claims = (0..size).map(|_| AtomicU64::new(0)).collect();
             self.intentions.resize(size, (0, 0));
             self.reserved.resize(size, None);
             self.states.resize(size, ResolveState::Unvisited);
         } else {
-            // Reset values
             self.claims.par_iter().for_each(|x| x.store(0, Ordering::Relaxed));
             self.reserved.par_iter_mut().for_each(|x| *x = None);
             self.states.par_iter_mut().for_each(|x| *x = ResolveState::Unvisited);
         }
     }
-
-    /// Get the name of the current movement function
-    #[inline(always)]
+    
+    pub fn set_movement(&mut self, movement: Movement) {
+        self.movement_function = movement.get_fn();
+        self.movement = movement;
+    }
+    
+    #[inline]
     pub fn get_movement_name(&self) -> &'static str {
-        self.get_name_for_movement(self.movement_function)
+        self.movement.name()
     }
-
-    pub fn set_movement_function(&mut self, movement_fn: MovementFn) {
-        self.movement_function = movement_fn;
-    }
-
-    pub fn is_stored_function(&self, function: MovementFn) -> bool {
-        self.movement_function as usize == function as usize
-    }
-
-    /// Get the name for a specific movement function (uses lookup table)
+    
     #[inline]
-    pub fn get_name_for_movement(&self, movement_fn: MovementFn) -> &'static str {
-        for &(func, name) in MOVEMENT_LOOKUP {
-            if func as usize == movement_fn as usize {
-                return name;
-            }
-        }
-        "unknown"
+    pub fn get_movement(&self) -> Movement {
+        self.movement
     }
-
-    /// Get movement function by name (uses lookup table)
+    
     #[inline]
-    pub fn get_movement_by_name(&self, movement_name: &str) -> Option<MovementFn> {
-        for &(func, name) in MOVEMENT_LOOKUP {
-            if name == movement_name {
-                return Some(func);
-            }
-        }
-        None
+    pub fn is_stored_movement(&self, movement: Movement) -> bool {
+        self.movement == movement
+    }
+    
+    /// Get movement type by name
+    #[inline]
+    pub fn get_movement_by_name(name: &str) -> Option<Movement> {
+        Movement::from_name(name)
     }
 
-    /// Get all available movement names (from lookup table)
-    #[inline(always)]
-    pub fn get_all_names(&self) -> &'static [&'static str; MOVEMENT_COUNT] {
-        &MOVEMENT_NAMES
+    #[inline]
+    pub fn get_name_for_movement(movement: Movement) -> &'static str {
+        movement.name()
+    }
+    
+    /// Get all available movement names
+    #[inline]
+    pub fn get_all_names() -> &'static [&'static str] {
+        Movement::NAMES
+    }
+    
+    /// Get all available movement types
+    #[inline]
+    pub fn get_all_movements() -> &'static [Movement] {
+        Movement::ALL
     }
 
     pub fn apply_movement(&mut self,
@@ -350,7 +373,7 @@ impl MovementRegistry {
                           grid: &mut Grid, // temp next_grid from previous step (apply rule)
                           ) {
 
-        if self.get_movement_name() == self.get_name_for_movement(Movements::static_movement) {
+        if self.movement == Movement::Static {
             // Swap buffers
             next_grid.update_grid(grid);
             return;
@@ -610,7 +633,7 @@ mod tests {
         ];
         let neighborhood_mvt = Neighborhood::new(3, 3, 1, 1, mask);
         let cell = &grid.cells[1][1];
-        let mv = Movements::static_movement(cell, &neighborhood_mvt, &grid);
+        let mv = MovementFunction::static_movement(cell, &neighborhood_mvt, &grid);
         assert_eq!(mv, (0, 0), "Static movement should not move");
     }
 
@@ -625,7 +648,7 @@ mod tests {
         let neighborhood_mvt = Neighborhood::new(3, 3, 1, 1, mask);
         let cell = &grid.cells[1][1];
         for _ in 0..10 {
-            let mv = Movements::random_movement(cell, &neighborhood_mvt, &grid);
+            let mv = MovementFunction::random_movement(cell, &neighborhood_mvt, &grid);
             let dr = mv.0 + neighborhood_mvt.center_row as isize;
             let dc = mv.1 + neighborhood_mvt.center_col as isize;
             assert!(dr >= 0 && dr < 3 && dc >= 0 && dc < 3, "Random movement must stay within neighborhood_mvt");
@@ -644,7 +667,7 @@ mod tests {
         ];
         let neighborhood_mvt = Neighborhood::new(3, 3, 1, 1, mask);
         let cell = &grid.cells[1][1];
-        let mv = Movements::gradient(cell, &neighborhood_mvt, &grid);
+        let mv = MovementFunction::gradient(cell, &neighborhood_mvt, &grid);
         assert_eq!(mv, (-1, 0), "Gradient should move toward highest trait neighbor");
     }
 
@@ -658,7 +681,7 @@ mod tests {
         ];
         let neighborhood_mvt = Neighborhood::new(3, 3, 1, 1, mask);
         let cell = &grid.cells[1][1];
-        let mv = Movements::avoid_crowding(cell, &neighborhood_mvt, &grid);
+        let mv = MovementFunction::avoid_crowding(cell, &neighborhood_mvt, &grid);
         assert_eq!(mv, (0, 0), "Avoid crowding should stay put if density is low");
     }
 
