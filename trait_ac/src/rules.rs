@@ -300,6 +300,69 @@ impl RuleFunction {
             my_social * 0.80 + avg * 0.2
         }
     }
+
+    pub fn local_majority(trait_index: usize, cell_r: usize, cell_c: usize, neighborhood_traits: &Neighborhood, grid: &Grid) -> f32 {
+        const NOISE_STRENGTH: f32 = 0.35;
+        let state_from_value = |value: f32| -> f32 {
+            if value > 0.5 {
+                1.0
+            } else if value < -0.5 {
+                -1.0
+            } else {
+                0.0
+            }
+        };
+
+        let mut influence_sum = 0.0;
+        let mut influence_count = 0;
+
+        let center_row = neighborhood_traits.center_row;
+        let center_col = neighborhood_traits.center_col;
+
+        for mask_r in 0..neighborhood_traits.height {
+            for mask_c in 0..neighborhood_traits.width {
+                if neighborhood_traits.is_valid(mask_r, mask_c) == 1
+                    && !(mask_r == center_row && mask_c == center_col)
+                {
+                    let (grid_r, grid_c) =
+                        neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
+                        influence_sum += state_from_value(neighbor_value);
+                        influence_count += 1;
+                    }
+                }
+            }
+        }
+
+        let current_state = state_from_value(grid.get_cell_trait(cell_r, cell_c, trait_index));
+
+        if influence_count == 0 {
+            return current_state;
+        }
+
+        let mut seed = (trait_index as u32)
+            .wrapping_mul(0x9E3779B9)
+            ^ (cell_r as u32).wrapping_mul(0x85EBCA6B)
+            ^ (cell_c as u32).wrapping_mul(0xC2B2AE35);
+
+        seed ^= seed >> 16;
+        seed = seed.wrapping_mul(0x7FEB352D);
+        seed ^= seed >> 15;
+        seed = seed.wrapping_mul(0x846CA68B);
+        seed ^= seed >> 16;
+
+        let noise = (seed as f32) / (u32::MAX as f32) * 2.0 - 1.0;
+        let decision = influence_sum + noise * NOISE_STRENGTH;
+
+        if decision > 0.0 {
+            1.0
+        } else if decision < 0.0 {
+            -1.0
+        } else {
+            current_state
+        }
+    }
 }
 
 
@@ -356,6 +419,7 @@ define_rules!(
     (WeightedAverage, "weighted_average", RuleFunction::weighted_average),
     (SocialEnergy,    "social energy",    RuleFunction::social_energy),
     (SocialInfluence, "social influence", RuleFunction::social_influence),
+    (LocalMajority,   "local majority",   RuleFunction::local_majority),
     // Add new rules here:
 );
 
@@ -510,6 +574,7 @@ mod tests {
             Rule::Average,
             Rule::Average,
             Rule::Average,
+            Rule::local_majority,
         ]);
 
         let result = rules_registry.apply_rule(1, 1, 1, &neighborhood, &grid);
