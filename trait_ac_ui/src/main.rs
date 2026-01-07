@@ -510,18 +510,14 @@ impl CAApp {
                 .for_each(|(row, next_row)| {
                     let row_offset = row * width;
                     
-                    // Process in cache-friendly chunks of 64
-                    for chunk_start in (0..width).step_by(64) {
-                        let chunk_end = (chunk_start + 64).min(width);
+                    for col in 0..width {
+                        let idx = row_offset + col;
                         
-                        for col in chunk_start..chunk_end {
-                            let idx = row_offset + col;
-                            next_row[col] = if self.grid.is_empty[idx] {
-                                current[idx]
-                            } else {
-                                self.rules_registry.apply_rule(trait_idx, row, col, &self.neighborhood_traits, &self.grid)
-                            };
-                        }
+                        next_row[col] = if self.grid.is_empty[idx] {
+                            current[idx]
+                        } else {
+                            self.rules_registry.apply_rule(trait_idx, row, col, &self.neighborhood_traits, &self.grid)
+                        };
                     }
                 });
         }
