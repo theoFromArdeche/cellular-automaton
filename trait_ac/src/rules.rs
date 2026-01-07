@@ -363,6 +363,128 @@ impl RuleFunction {
             current_state
         }
     }
+    pub fn panic_threshold(
+        trait_index: usize,
+        cell_r: usize,
+        cell_c: usize,
+        neighborhood_traits: &Neighborhood,
+        grid: &Grid,
+    ) -> f32 {
+        const THETA: f32 = 0.55;
+
+        let to_state = |value: f32| -> f32 {
+            if value > 0.5 {
+                1.0
+            } else if value < -0.5 {
+                -1.0
+            } else {
+                0.0
+            }
+        };
+
+        let mut buyers = 0;
+        let mut sellers = 0;
+        let mut total = 0;
+
+        let center_row = neighborhood_traits.center_row;
+        let center_col = neighborhood_traits.center_col;
+
+        for mask_r in 0..neighborhood_traits.height {
+            for mask_c in 0..neighborhood_traits.width {
+                if neighborhood_traits.is_valid(mask_r, mask_c) == 1
+                    && !(mask_r == center_row && mask_c == center_col)
+                {
+                    let (grid_r, grid_c) =
+                        neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        let state = to_state(grid.get_cell_trait(grid_r, grid_c, trait_index));
+                        if state > 0.5 {
+                            buyers += 1;
+                        } else if state < -0.5 {
+                            sellers += 1;
+                        }
+                        total += 1;
+                    }
+                }
+            }
+        }
+
+        if total == 0 {
+            return to_state(grid.get_cell_trait(cell_r, cell_c, trait_index));
+        }
+
+        let seller_ratio = sellers as f32 / total as f32;
+        if seller_ratio > THETA {
+            -1.0
+        } else {
+            let buyer_ratio = buyers as f32 / total as f32;
+            if buyer_ratio > THETA {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    }
+
+    pub fn lux_marchesi(
+        trait_index: usize,
+        cell_r: usize,
+        cell_c: usize,
+        neighborhood_traits: &Neighborhood,
+        grid: &Grid,
+    ) -> f32 {
+        // 1. Determine Agent Type based on coordinates (Deterministic)
+        // Use a simple hash so a specific cell always acts as the same type of trader
+        let seed = (cell_r as u32).wrapping_mul(37).wrapping_add((cell_c as u32).wrapping_mul(17));
+        // let is_chartist = (seed % 100) < 50; // 50% Chartists, 50% Fundamentalists
+        
+        // You can tweak this ratio. More chartists = more bubbles. More fundamentalists = more stability.
+        let is_chartist = (seed % 100) < 60; 
+
+        if is_chartist {
+            // --- Chartist: Imitates neighbors (Trend Follower) ---
+            // We reuse the Local Majority logic (Ising model)
+            Self::local_majority(trait_index, cell_r, cell_c, neighborhood_traits, grid)
+        } else {
+            // --- Fundamentalist: Compares Price to Fundamental Value ---
+            // Fundamental Value is assumed to be 0.0 (neutral)
+            // "Current Price" is estimated by the local neighborhood sentiment
+            
+            let fundamental_value = 0.0;
+            let mut price_sentiment = 0.0;
+            let mut count = 0;
+
+            let center_row = neighborhood_traits.center_row;
+            let center_col = neighborhood_traits.center_col;
+
+            for mask_r in 0..neighborhood_traits.height {
+                for mask_c in 0..neighborhood_traits.width {
+                    if neighborhood_traits.is_valid(mask_r, mask_c) == 1 
+                        && !(mask_r == center_row && mask_c == center_col) {
+                        
+                        let (grid_r, grid_c) = neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                        
+                        if !grid.is_cell_empty(grid_r, grid_c) {
+                            price_sentiment += grid.get_cell_trait(grid_r, grid_c, trait_index);
+                            count += 1;
+                        }
+                    }
+                }
+            }
+
+            let local_price = if count > 0 { price_sentiment / count as f32 } else { 0.0 };
+
+            // Logic: Buy Low (Price < Fundamental), Sell High (Price > Fundamental)
+            if local_price < fundamental_value {
+                1.0 // Buy (Undervalued)
+            } else if local_price > fundamental_value {
+                -1.0 // Sell (Overvalued)
+            } else {
+                0.0 // Hold
+            }
+        }
+    }
 }
 
 
@@ -420,6 +542,8 @@ define_rules!(
     (SocialEnergy,    "social energy",    RuleFunction::social_energy),
     (SocialInfluence, "social influence", RuleFunction::social_influence),
     (LocalMajority,   "local majority",   RuleFunction::local_majority),
+    (PanicThreshold,  "panic threshold",  RuleFunction::panic_threshold),
+    (LuxMarchesi,     "lux marchesi",     RuleFunction::lux_marchesi),
     // Add new rules here:
 );
 
