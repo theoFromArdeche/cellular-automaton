@@ -384,7 +384,7 @@ impl MovementRegistry {
                     let c = global_idx % width;
                     
                     // Skip empty cells - BitVec: true = empty
-                    if next_grid.is_empty[global_idx] {
+                    if next_grid.is_empty[global_idx] { // the is_empty is never changed on the temp grid (here "grid")
                         continue;
                     }
                     
@@ -504,7 +504,7 @@ impl MovementRegistry {
         let width = grid.width;
 
         // Collect results first, then apply
-        for trait_idx in 0..Grid::NUM_TRAITS {
+        for trait_idx in 0..grid.num_traits {
             let current = grid.get_trait_slice(trait_idx);
             let out_trait = next_grid.get_trait_slice_mut(trait_idx);
             
@@ -594,7 +594,7 @@ mod tests {
         let mut grid = Grid::new(3, 3);
         for r in 0..3 {
             for c in 0..3 {
-                for index in 0..9 {
+                for index in 0..grid.num_traits {
                     grid.set_cell_trait(r, c, index, 0.5);
                 }
             }

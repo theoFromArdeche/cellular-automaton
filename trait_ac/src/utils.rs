@@ -4,9 +4,9 @@ use crate::rules::RulesRegistry;
 
 
 /// Print active trait indices with their names
-pub fn print_active_traits(active_mask: &[u8; 9], trait_names: &[String; 9], rules_registry: &RulesRegistry) {
+pub fn print_active_traits(num_traits: usize, active_mask: &[u8], trait_names: &[String], rules_registry: &RulesRegistry) {
     println!("  Active traits:");
-    for trait_index in 0..9 {
+    for trait_index in 0..num_traits {
         if active_mask[trait_index] == 0 {
             continue;
         }
@@ -17,7 +17,7 @@ pub fn print_active_traits(active_mask: &[u8; 9], trait_names: &[String; 9], rul
 }
 
 /// Print a single trait array in row-major order
-pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String; 9]) {
+pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String]) {
     let values = grid.get_trait_slice(trait_index);
     
     println!("\n=== Trait {} ({}) ===", trait_index, trait_names[trait_index]);
@@ -43,8 +43,8 @@ pub fn print_trait_array(grid: &Grid, trait_index: usize, trait_names: &[String;
 }
 
 /// Print all active trait arrays
-pub fn print_active_traits_array(grid: &Grid, active_mask: &[u8; 9], trait_names: &[String; 9]) {
-    for trait_index in 0..9 {
+pub fn print_active_traits_array(grid: &Grid, active_mask: &[u8], trait_names: &[String]) {
+    for trait_index in 0..grid.num_traits {
         if active_mask[trait_index] == 0 {
             continue;
         }
@@ -59,7 +59,7 @@ pub fn print_statistics(grid: &Grid, active_mask: &[u8; 9]) {
     println!("Total cells: {}", grid.width * grid.height);
     println!("Active traits: {}/9", active_mask.iter().sum::<u8>());
 
-    for trait_index in 0..9 {
+    for trait_index in 0..grid.num_traits {
         if active_mask[trait_index] == 0 {
             continue;
         }
@@ -77,8 +77,8 @@ pub fn print_statistics(grid: &Grid, active_mask: &[u8; 9]) {
 }
 
 /// Create default trait names
-pub fn default_traits_names() -> [String; 9] {
-    [
+pub fn default_traits_names() -> Vec<String> {
+    vec![
         "Trait_0_0".to_string(),
         "Trait_0_1".to_string(),
         "Trait_0_2".to_string(),
@@ -92,8 +92,8 @@ pub fn default_traits_names() -> [String; 9] {
 }
 
 /// Create semantic trait names for examples
-pub fn semantic_traits_names() -> [String; 9] {
-    [
+pub fn semantic_traits_names() -> Vec<String> {
+    vec![
         "Energy".to_string(),
         "Social".to_string(),
         "Color/Team".to_string(),
