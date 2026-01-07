@@ -7,23 +7,24 @@ pub struct Grid {
     pub width: usize,
     pub height: usize,
     pub num_cells: usize,
+    pub num_traits: usize,
     /// Single contiguous allocation: [trait0..., trait1..., ..., trait8...]
     pub data: Vec<f32>,
     pub is_empty: BitVec<u64, Lsb0>,
 }
 
 impl Grid {
-    pub const NUM_TRAITS: usize = 9;
-
     /// Create a new grid with random cells
-    pub fn new(width: usize, height: usize) -> Self {
-        Self::new_with_density(width, height, 1.0, [(0.0, 1.0); Self::NUM_TRAITS])
+    pub fn new(width: usize, height: usize, num_traits: usize) -> Self {
+        let trait_ranges = vec![(0.0, 1.0); num_traits];
+        Self::new_with_density(width, height, 1.0, num_traits, &trait_ranges)
     }
 
     pub fn new_with_density(width: usize,
                             height: usize,
                             fill_percentage: f32,
-                            trait_ranges: [(f32, f32); Self::NUM_TRAITS],  // (min, max) for each trait
+                            num_traits: usize,
+                            trait_ranges: &Vec<(f32, f32)>,  // (min, max) for each trait
                             ) -> Self {
 
         let fill_percentage = fill_percentage.clamp(0.0, 1.0);
@@ -31,14 +32,14 @@ impl Grid {
         let num_cells = width * height;
         
         // Single allocation for all traits
-        let mut data = vec![0.0; num_cells * Self::NUM_TRAITS];
+        let mut data = vec![0.0; num_cells * num_traits];
         let mut is_empty = bitvec![u64, Lsb0; 1; num_cells]; // Start all empty
         
         for idx in 0..num_cells {
             if rng.gen_range(0.0..=1.0) < fill_percentage {
                 is_empty.set(idx, false); // Mark as filled
                 
-                for t in 0..Self::NUM_TRAITS {
+                for t in 0..num_traits {
                     let (min, max) = trait_ranges[t];
                     data[t * num_cells + idx] = rng.gen_range(min..=max);
                 }
@@ -49,6 +50,7 @@ impl Grid {
             width,
             height,
             num_cells,
+            num_traits,
             data,
             is_empty,
         }
@@ -138,7 +140,7 @@ impl Grid {
         for r in 0..self.width {
             for c in 0..self.height {
                 if !self.is_cell_empty(r, c) {  // false = filled
-                    for t in 0..Self::NUM_TRAITS {
+                    for t in 0..self.num_traits {
                         self.set_cell_trait(r, c, t, rng.gen_range(0.0..=1.0));
                     }
                 }
@@ -160,7 +162,7 @@ mod tests {
         let grid = Grid::new(5, 5);
         assert_eq!(grid.width, 5);
         assert_eq!(grid.height, 5);
-        assert_eq!(grid.data.len(), 5*5*Self::NUM_TRAITS);
+        assert_eq!(grid.data.len(), 5*5*grid.num_traits);
     }
 
     #[test]

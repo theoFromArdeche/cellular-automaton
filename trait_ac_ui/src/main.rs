@@ -269,7 +269,8 @@ struct CAApp {
     // Grid state
     grid: Grid,
     grid_density: f32,
-    initialisation_ranges: [(f32, f32); 9],
+    num_traits: usize,
+    initialisation_ranges: Vec<(f32, f32)>,
     next_grid: Grid,
     
     // Simulation state
@@ -287,7 +288,7 @@ struct CAApp {
     avg_step_time: Option<f32>,
     
     // Configuration
-    active_mask: [u8; 9],
+    active_mask: Vec<u8>,
     active_traits: Vec<usize>,
     neighborhood_traits: Neighborhood,
     neighborhood_mvt: Neighborhood,
@@ -312,7 +313,7 @@ struct CAApp {
     cell_size_max: f32,
     
     // Trait names
-    trait_names: [String; 9],
+    trait_names: Vec<String>,
 }
 
 impl CAApp {
@@ -333,6 +334,7 @@ impl CAApp {
         let grid_height = 500;
         let steps_per_second = 1000.0;
         let grid_density = 0.5;
+        let num_traits = 9;
 
         let timed_simulation = false;
         let timestep_max = 100;
@@ -356,7 +358,7 @@ impl CAApp {
         let color_scheme = ColorScheme::Viridis;
         let base_color_no_actor = 0.0;
 
-        let active_mask: [u8; 9] = [
+        let active_mask = vec![
             1, 1, 0,
             0, 0, 0,
             0, 0, 0,
@@ -364,7 +366,7 @@ impl CAApp {
         let initial_selected_trait = 0;
 
         // range at initialisation for each traits
-        let initialisation_ranges = [ 
+        let initialisation_ranges = vec![ 
             (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
             (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
             (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
@@ -374,7 +376,7 @@ impl CAApp {
         let trait_names = semantic_traits_names();
 
         // Custum rules for each traits
-        let rules: [RuleFn; 9] = [
+        let rules: Vec<RuleFn> = vec![
                 Rules::social_energy, Rules::social_influence, Rules::conway_optimized,
                 Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
                 Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
@@ -385,7 +387,7 @@ impl CAApp {
         let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
 
         // Initialize grid
-        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, initialisation_ranges);
+        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, num_traits, &initialisation_ranges);
 
         let neighborhood_traits_mask = vec![
             vec![1, 1, 1],
@@ -430,6 +432,7 @@ impl CAApp {
             width: grid.width,
             height: grid.height,
             num_cells: grid.num_cells,
+            num_traits: grid.num_traits,
             data: grid.data.clone(),
             is_empty: grid.is_empty.clone(),
         };
@@ -445,6 +448,7 @@ impl CAApp {
         Self {
             grid,
             grid_density,
+            num_traits,
             initialisation_ranges,
             next_grid,
 
@@ -533,13 +537,14 @@ impl CAApp {
     }
     
     fn reset_grid(&mut self) {
-        self.grid = Grid::new_with_density(self.grid.width, self.grid.height, self.grid_density, self.initialisation_ranges);
+        self.grid = Grid::new_with_density(self.grid.width, self.grid.height, self.grid_density, self.num_traits, &self.initialisation_ranges);
         self.movement_registry.prepare(self.grid.width, self.grid.height);
         // Pre-allocate next grid
         self.next_grid = Grid {
             width: self.grid.width,
             height: self.grid.height,
             num_cells: self.grid.num_cells,
+            num_traits: self.grid.num_traits,
             data: self.grid.data.clone(),
             is_empty: self.grid.is_empty.clone(),
         };
@@ -555,7 +560,7 @@ impl CAApp {
 
     fn update_grayscale_buffer(&mut self) {
         if self.active_mask[self.selected_trait] == 0 {
-            if let Some(i) = (0..9).find(|&i| self.active_mask[i] == 1) {
+            if let Some(i) = (0..self.num_traits).find(|&i| self.active_mask[i] == 1) {
                 self.selected_trait = i;
             } else {
                 return;
@@ -616,7 +621,7 @@ impl eframe::App for CAApp {
             println!("  Timesteps: {}", self.timestep);
             
             // Print active traits for info
-            print_active_traits(&self.active_mask, &self.trait_names, &self.rules_registry);
+            print_active_traits(self.num_traits, &self.active_mask, &self.trait_names, &self.rules_registry);
             
             let elapsed = self.start.elapsed();
             println!("\nExecution time: {:?}", elapsed);
@@ -775,7 +780,7 @@ impl eframe::App for CAApp {
             // Trait rules
             ui.label("Trait Rules");
             egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
-                for trait_idx in 0..9 {
+                for trait_idx in 0..self.num_traits {
                     // Skip inactive traits
                     if self.active_mask[trait_idx] == 0 {
                         continue;
@@ -811,7 +816,7 @@ impl eframe::App for CAApp {
         });
 
         if self.active_mask[self.selected_trait] == 0 { // update currenlty displayed trait if needed
-            if let Some(new_idx) = (0..9).find(|&i| self.active_mask[i] == 1) {
+            if let Some(new_idx) = (0..self.num_traits).find(|&i| self.active_mask[i] == 1) {
                 self.selected_trait = new_idx;
                 flag_update_texture = true;
             }
@@ -832,7 +837,7 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt("trait_select")
                             .selected_text(&self.trait_names[self.selected_trait])
                             .show_ui(ui, |ui| {
-                                for trait_idx in 0..9 {
+                                for trait_idx in 0..self.num_traits{
                                     if self.active_mask[trait_idx] == 0 {
                                         continue;
                                     }
@@ -881,7 +886,7 @@ impl eframe::App for CAApp {
                     egui::ScrollArea::vertical()
                         .max_height(300.0) // adjust as needed
                         .show(ui, |ui| {
-                            for trait_idx in 0..9 {
+                            for trait_idx in 0..self.num_traits {
                                 // Skip inactive traits
                                 if self.active_mask[trait_idx] == 0 {
                                     continue;

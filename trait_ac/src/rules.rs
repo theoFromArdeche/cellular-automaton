@@ -307,9 +307,9 @@ impl Rules {
 
 pub type RuleFn = fn(usize, usize, usize, &Neighborhood, &Grid) -> f32;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct RulesRegistry {
-    rules: [RuleFn; 9],
+    rules: Vec<RuleFn>,
 }
 
 // Static lookup table for function pointer to name mapping
@@ -342,13 +342,13 @@ const fn extract_names<'a, const N: usize>(lookup: &'a [(RuleFn, &'a str)]) -> [
 static RULE_NAMES: [&str; RULE_COUNT] = extract_names::<RULE_COUNT>(RULE_LOOKUP);
 
 impl RulesRegistry {
-    pub fn default() -> Self {
+    pub fn default(num_traits: usize) -> Self {
         Self {
-            rules: [Rules::average; 9],
+            rules: vec![Rules::average; num_traits],
         }
     }
 
-    pub fn custom(rules: [RuleFn; 9]) -> Self {
+    pub fn custom(rules: Vec<RuleFn>) -> Self {
         Self { rules }
     }
 

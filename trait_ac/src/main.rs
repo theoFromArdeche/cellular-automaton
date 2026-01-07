@@ -13,16 +13,17 @@ fn main() {
     let grid_height = 3000;
     let grid_width = 3000;
     let grid_density = 1.0;
+    let num_traits = 1;
     let timesteps = 100;
     
-    let active_mask: [u8; 9] = [
+    let active_mask = vec![
         1, 0, 0,
         0, 0, 0,
         0, 0, 0,
     ];
 
     // range at initialisation for each traits
-    let initialisation_ranges = [ 
+    let initialisation_ranges = vec![ 
         (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
         (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
         (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
@@ -31,7 +32,7 @@ fn main() {
     let trait_names = semantic_traits_names();
 
     // Custum rules for each traits
-    let rules: [RuleFn; 9] = [
+    let rules: Vec<RuleFn> = vec![
         Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
         Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
         Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
@@ -42,7 +43,7 @@ fn main() {
     let mut movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
 
     // Initialize grid
-    let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density, initialisation_ranges);
+    let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density, num_traits, &initialisation_ranges);
 
     let neighborhood_traits_mask = vec![
         vec![1, 1, 1],
@@ -85,13 +86,14 @@ fn main() {
     println!("Configuration:");
     println!("  Grid: {}x{}", grid_width, grid_height);
     println!("  Timesteps: {}", timesteps);
-    print_active_traits(&active_mask, &trait_names, &rules_registry);
+    print_active_traits(num_traits, &active_mask, &trait_names, &rules_registry);
 
     // Pre-allocate next grid
     let mut next_grid = Grid {
         width: grid.width,
         height: grid.height,
         num_cells: grid.num_cells,
+        num_traits: grid.num_traits,
         data: grid.data.clone(),
         is_empty: grid.is_empty.clone(),
     };
