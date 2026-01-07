@@ -503,7 +503,6 @@ impl MovementRegistry {
 
         let width = grid.width;
 
-        // Collect results first, then apply
         for trait_idx in 0..grid.num_traits {
             let current = grid.get_trait_slice(trait_idx);
             let out_trait = next_grid.get_trait_slice_mut(trait_idx);
@@ -524,7 +523,6 @@ impl MovementRegistry {
     }
 
 
-    // Optimized DFS for flat buffers
     pub fn resolve_move(&mut self, r: usize, c: usize, w: usize) {
         let idx = r * w + c;
 
