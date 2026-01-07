@@ -1,69 +1,164 @@
 use trait_ac::neighborhood::Neighborhood;
 use trait_ac::grid::Grid;
-use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
-use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
+use trait_ac::rules::{RulesRegistry, Rule};
+use trait_ac::movement::{MovementRegistry, Movement};
 use trait_ac::utils::{print_separator, semantic_traits_names, print_active_traits}; // print_trait_array
 use std::time::Instant;
 use rayon::prelude::*;
+use serde::Deserialize;
+use std::fs;
+
+fn deserialize_rules<'de, D>(deserializer: D) -> Result<Vec<Rule>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let names: Vec<String> = Vec::deserialize(deserializer)?;
+    names
+        .into_iter()
+        .map(|name| {
+            Rule::from_name(&name).ok_or_else(|| serde::de::Error::custom(format!("Unknown rule: {}", name)))
+        })
+        .collect()
+}
+
+fn deserialize_movement<'de, D>(deserializer: D) -> Result<Movement, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let name = String::deserialize(deserializer)?;
+    Movement::from_name(&name)
+        .ok_or_else(|| serde::de::Error::custom(format!("Unknown movement: {}", name)))
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct Config {
+    // Grid settings
+    pub grid_height: usize,
+    pub grid_width: usize,
+    pub grid_density: f32,
+    pub timesteps: usize,
+
+    // Trait settings
+    pub num_traits: usize,
+    pub active_mask: Vec<u8>,
+    pub initialisation_ranges: Vec<(f32, f32)>,
+
+    // Rules & movement (with custom deserializers)
+    #[serde(deserialize_with = "deserialize_rules")]
+    pub rules: Vec<Rule>,
+    #[serde(deserialize_with = "deserialize_movement")]
+    pub movement: Movement,
+
+    // Neighborhood masks
+    pub neighborhood_traits_mask: Vec<Vec<u8>>,
+    pub neighborhood_mvt_mask: Vec<Vec<u8>>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            grid_height: 1000,
+            grid_width: 1000,
+            grid_density: 1.0,
+            timesteps: 100,
+            num_traits: 1,
+            active_mask: vec![
+                1, 0, 0,
+                0, 0, 0,
+                0, 0, 0,
+            ],
+            initialisation_ranges: vec![
+                (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+                (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+                (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+            ],
+            rules: vec![
+                Rule::ConwayOptimized, Rule::ConwayOptimized, Rule::ConwayOptimized,
+                Rule::ConwayOptimized, Rule::ConwayOptimized, Rule::ConwayOptimized,
+                Rule::ConwayOptimized, Rule::ConwayOptimized, Rule::ConwayOptimized,
+            ],
+            movement: Movement::Static,
+            neighborhood_traits_mask: vec![
+                vec![1, 1, 1],
+                vec![1, 1, 1],
+                vec![1, 1, 1],
+            ],
+            neighborhood_mvt_mask: vec![
+                vec![1, 1, 1],
+                vec![1, 1, 1],
+                vec![1, 1, 1],
+            ],
+        }
+    }
+}
+
+impl Config {
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.grid_width == 0 || self.grid_height == 0 {
+            return Err("Grid dimensions must be > 0");
+        }
+        if !(0.0..=1.0).contains(&self.grid_density) {
+            return Err("Density must be between 0.0 and 1.0");
+        }
+        if self.timesteps == 0 {
+            return Err("Timesteps must be > 0");
+        }
+        if self.num_traits == 0 {
+            return Err("num_traits must be > 0");
+        }
+        if self.active_mask.is_empty() {
+            return Err("active_mask must not be empty");
+        }
+        if self.initialisation_ranges.is_empty() {
+            return Err("initialisation_ranges must not be empty");
+        }
+        if self.rules.is_empty() {
+            return Err("rules must not be empty");
+        }
+        Ok(())
+    }
+}
 
 fn main() {
     println!("=== Modular Cellular Automata Simulation ===\n");
 
-    // Configuration
-    let grid_height = 3000;
-    let grid_width = 3000;
-    let grid_density = 1.0;
-    let num_traits = 1;
-    let timesteps = 100;
-    
-    let active_mask = vec![
-        1, 0, 0,
-        0, 0, 0,
-        0, 0, 0,
-    ];
-
-    // range at initialisation for each traits
-    let initialisation_ranges = vec![ 
-        (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-        (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-        (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-    ];
+    let config = Config::load("config.toml").unwrap_or_else(|e| {
+        eprintln!("Config error: {}", e);
+        std::process::exit(1);
+    });
 
     let trait_names = semantic_traits_names();
 
-    // Custum rules for each traits
-    let rules: Vec<RuleFn> = vec![
-        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-        Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-    ];
-    let rules_registry = RulesRegistry::custom(rules);
+    let rules_registry = RulesRegistry::custom(config.rules);
+    let mut movement_registry = MovementRegistry::custom(
+        config.grid_width,
+        config.grid_height,
+        config.movement,
+    );
 
-    let movement_function: MovementFn = Movements::static_movement;
-    let mut movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
+    let mut grid = Grid::new_with_density(
+        config.grid_width,
+        config.grid_height,
+        config.grid_density,
+        config.num_traits,
+        &config.initialisation_ranges,
+    );
 
-    // Initialize grid
-    let mut grid = Grid::new_with_density(grid_width, grid_height, grid_density, num_traits, &initialisation_ranges);
-
-    let neighborhood_traits_mask = vec![
-        vec![1, 1, 1],
-        vec![1, 1, 1],
-        vec![1, 1, 1],
-    ];
-
-    let neighborhood_mvt_mask = vec![
-        vec![1, 1, 1],
-        vec![1, 1, 1],
-        vec![1, 1, 1],
-    ];
-
-    let neighborhood_traits_height = neighborhood_traits_mask.len();
-    let neighborhood_traits_width = neighborhood_traits_mask[0].len();
+    let neighborhood_traits_height = config.neighborhood_traits_mask.len();
+    let neighborhood_traits_width = config.neighborhood_traits_mask[0].len();
     let neighborhood_traits_center_row = (neighborhood_traits_height - 1) / 2;
     let neighborhood_traits_center_col = (neighborhood_traits_width - 1) / 2;
 
-    let neighborhood_mvt_height = neighborhood_mvt_mask.len();
-    let neighborhood_mvt_width = neighborhood_mvt_mask[0].len();
+    let neighborhood_mvt_height = config.neighborhood_mvt_mask.len();
+    let neighborhood_mvt_width = config.neighborhood_mvt_mask[0].len();
     let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
     let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
 
@@ -72,7 +167,7 @@ fn main() {
         neighborhood_traits_height,
         neighborhood_traits_center_row,
         neighborhood_traits_center_col,
-        neighborhood_traits_mask,
+        config.neighborhood_traits_mask,
     );
 
     let neighborhood_mvt = Neighborhood::new(
@@ -80,13 +175,13 @@ fn main() {
         neighborhood_mvt_height,
         neighborhood_mvt_center_row,
         neighborhood_mvt_center_col,
-        neighborhood_mvt_mask,
+        config.neighborhood_mvt_mask,
     );
 
     println!("Configuration:");
-    println!("  Grid: {}x{}", grid_width, grid_height);
-    println!("  Timesteps: {}", timesteps);
-    print_active_traits(num_traits, &active_mask, &trait_names, &rules_registry);
+    println!("  Grid: {}x{}", grid.width, grid.height);
+    println!("  Timesteps: {}", config.timesteps);
+    print_active_traits(config.num_traits, &config.active_mask, &trait_names, &rules_registry);
 
     // Pre-allocate next grid
     let mut next_grid = Grid {
@@ -99,7 +194,7 @@ fn main() {
     };
 
     // Collect active trait indices once
-    let active_traits: Vec<usize> = active_mask
+    let active_traits: Vec<usize> = config.active_mask
         .iter()
         .enumerate()
         .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
@@ -109,7 +204,7 @@ fn main() {
 
     // Simulation loop
     let start = Instant::now();
-    for _t in 1..=timesteps {
+    for _t in 1..=config.timesteps {
         let width = grid.width;
     
         // Sequential over active traits (small number), parallel over rows
@@ -154,10 +249,10 @@ fn main() {
     println!("Execution time: {:?}", elapsed);
     println!(
         "Performance: {:.2} timesteps/sec",
-        timesteps as f64 / elapsed.as_secs_f64()
+        config.timesteps as f64 / elapsed.as_secs_f64()
     );
     println!(
         "Cells/sec: {:.2}M",
-        (grid_width * grid_height * timesteps) as f64 / elapsed.as_secs_f64() / 1_000_000.0
+        (grid.width * grid.height * config.timesteps) as f64 / elapsed.as_secs_f64() / 1_000_000.0
     );
 }

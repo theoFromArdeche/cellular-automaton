@@ -1,16 +1,17 @@
-use eframe::{egui, glow};
-use egui::{Color32};
 use trait_ac::grid::Grid;
 use trait_ac::neighborhood::Neighborhood;
-use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
-use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
+use trait_ac::rules::{RulesRegistry, Rule};
+use trait_ac::movement::{MovementRegistry, Movement};
 use trait_ac::utils::{semantic_traits_names, print_separator, print_active_traits};
+
+use trait_ac_ui::color_scheme::ColorScheme;
+use trait_ac_ui::config::Config;
+use trait_ac_ui::gpu_renderer::GPURenderer;
+
+use eframe::{egui, glow};
 use rayon::prelude::*;
 use std::time::Instant;
 use std::sync::{Arc, Mutex};
-use eframe::glow::HasContext;
-
-
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -30,240 +31,6 @@ fn main() -> eframe::Result<()> {
         }),
     )
 }
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ColorScheme {
-    Viridis,
-    Plasma,
-    Grayscale,
-    RedBlue,
-}
-
-impl ColorScheme {
-    fn all() -> Vec<Self> {
-        vec![Self::Viridis, Self::Plasma, Self::Grayscale, Self::RedBlue]
-    }
-    
-    fn name(&self) -> &str {
-        match self {
-            Self::Viridis => "Viridis",
-            Self::Plasma => "Plasma",
-            Self::Grayscale => "Grayscale",
-            Self::RedBlue => "Red-Blue",
-        }
-    }
-
-    fn to_index(&self) -> usize {
-        match self {
-            Self::Viridis => 0,
-            Self::Plasma => 1,
-            Self::Grayscale => 2,
-            Self::RedBlue => 3,
-        }
-    }
-
-    fn map_value(&self, value: f32, is_empty: bool, base_color_no_actor: f32) -> Color32 {
-        let v;
-        if !is_empty {
-            v = (base_color_no_actor + value*(1.0-base_color_no_actor)).clamp(0.0, 1.0);
-        } else {
-            v = 0.0;
-        }
-        match self {
-            Self::Viridis => {
-                let r = (68.0 + v * (253.0 - 68.0)) as u8;
-                let g = (1.0 + v * (231.0 - 1.0)) as u8;
-                let b = (84.0 + v * (37.0 - 84.0)) as u8;
-                Color32::from_rgb(r, g, b)
-            }
-            Self::Plasma => {
-                let r = (13.0 + v * (240.0 - 13.0)) as u8;
-                let g = (8.0 + v * (50.0 - 8.0)) as u8;
-                let b = (135.0 + v * (33.0 - 135.0)) as u8;
-                Color32::from_rgb(r, g, b)
-            }
-            Self::Grayscale => {
-                let c = (v * 255.0) as u8;
-                Color32::from_rgb(c, c, c)
-            }
-            Self::RedBlue => {
-                if v < 0.5 {
-                    let t = v * 2.0;
-                    Color32::from_rgb(0, 0, (t * 255.0) as u8)
-                } else {
-                    let t = (v - 0.5) * 2.0;
-                    Color32::from_rgb((t * 255.0) as u8, 0, ((1.0 - t) * 255.0) as u8)
-                }
-            }
-        }
-    }
-}
-
-struct GPURenderer {
-    gl: Arc<glow::Context>,
-    texture: glow::Texture,
-    programs: [glow::Program; 4],
-    vao: glow::VertexArray,
-    vbo: glow::Buffer,
-}
-
-impl GPURenderer {
-    fn new(gl: Arc<glow::Context>) -> Result<Self, String> {
-        unsafe {
-            let vertex_shader_src = include_str!("shaders/vertex.glsl");
-            let fragment_shaders = [
-                include_str!("shaders/viridis.glsl"),
-                include_str!("shaders/plasma.glsl"),
-                include_str!("shaders/grayscale.glsl"),
-                include_str!("shaders/redblue.glsl"),
-            ];
-            
-            let mut programs = [None, None, None, None];
-            for i in 0..fragment_shaders.len() {
-                programs[i] = Some(Self::create_program(&gl, vertex_shader_src, fragment_shaders[i])?);
-            }
-            
-            let texture = gl.create_texture()?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-            
-            let vao = gl.create_vertex_array()?;
-            let vbo = gl.create_buffer()?;
-            
-            Ok(Self {
-                gl,
-                texture,
-                programs: [programs[0].unwrap(), programs[1].unwrap(), programs[2].unwrap(), programs[3].unwrap()],
-                vao,
-                vbo,
-            })
-        }
-    }
-    
-    unsafe fn create_program(gl: &glow::Context, vs: &str, fs: &str) -> Result<glow::Program, String> {
-        let program = unsafe { gl.create_program()? };
-        let v = unsafe { gl.create_shader(glow::VERTEX_SHADER)? };
-        unsafe { gl.shader_source(v, vs) };
-        unsafe { gl.compile_shader(v) } ;
-        if unsafe { !gl.get_shader_compile_status(v) } {
-            return Err(unsafe { gl.get_shader_info_log(v) });
-        }
-        
-        let f = unsafe { gl.create_shader(glow::FRAGMENT_SHADER)? };
-        unsafe { gl.shader_source(f, fs) };
-        unsafe { gl.compile_shader(f) };
-        if unsafe { !gl.get_shader_compile_status(f) } {
-            return Err(unsafe { gl.get_shader_info_log(f) });
-        }
-        
-        unsafe { gl.attach_shader(program, v) };
-        unsafe { gl.attach_shader(program, f) };
-        unsafe { gl.link_program(program) };
-        
-        if unsafe {!gl.get_program_link_status(program)} {
-            return Err(unsafe { gl.get_program_info_log(program) });
-        }
-        
-        unsafe { gl.delete_shader(v); }
-        unsafe { gl.delete_shader(f); }
-        Ok(program)
-    }
-    
-    fn update_texture(&mut self, width: usize, height: usize, data: &[u8], resize_flag: bool) {
-        unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            
-            // Only reallocate if dimensions change
-            if resize_flag {
-                self.gl.tex_image_2d(
-                    glow::TEXTURE_2D, 0, glow::R8 as i32,
-                    width as i32, height as i32, 0,
-                    glow::RED, glow::UNSIGNED_BYTE, eframe::glow::PixelUnpackData::Slice(None), // Allocate only
-                );
-            }
-
-            // Fast update
-            self.gl.tex_sub_image_2d(
-                glow::TEXTURE_2D, 0, 
-                0, 0, // x, y offset
-                width as i32, height as i32,
-                glow::RED, glow::UNSIGNED_BYTE,
-                eframe::glow::PixelUnpackData::Slice(Some(data)),
-            );
-        }
-    }
-    
-    fn paint(&self, scheme: usize, rect: egui::Rect, _screen: [f32; 2], 
-            scroll_offset: egui::Vec2, content_size: egui::Vec2) {
-        unsafe {
-            let gl = &self.gl;
-            let prog = self.programs[scheme];
-            gl.use_program(Some(prog));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            gl.uniform_1_i32(gl.get_uniform_location(prog, "u_texture").as_ref(), 0);
-            
-            let rect_size = rect.size();
-            gl.uniform_2_f32(
-                gl.get_uniform_location(prog, "u_rect_size").as_ref(),
-                rect_size.x,
-                rect_size.y,
-            );
-            
-            let rect_min = rect.min;
-            gl.uniform_2_f32(
-                gl.get_uniform_location(prog, "u_rect_min").as_ref(),
-                rect_min.x,
-                rect_min.y,
-            );
-            
-            // Calculate what portion of the texture is visible
-            // Clamp to [0, 1] range to avoid repeating
-            let tex_min_x = (scroll_offset.x / content_size.x).max(0.0).min(1.0);
-            let tex_min_y = (scroll_offset.y / content_size.y).max(0.0).min(1.0);
-            let tex_max_x = ((scroll_offset.x + rect_size.x) / content_size.x).max(0.0).min(1.0);
-            let tex_max_y = ((scroll_offset.y + rect_size.y) / content_size.y).max(0.0).min(1.0);
-            
-            // Calculate how much of the viewport actually contains texture
-            let visible_content_width = (content_size.x - scroll_offset.x).max(0.0).min(rect_size.x);
-            let visible_content_height = (content_size.y - scroll_offset.y).max(0.0).min(rect_size.y);
-            
-            // Only render where there's actual content
-            let render_max_x = rect.min.x + visible_content_width;
-            let render_max_y = rect.min.y + visible_content_height;
-            
-            let verts: [f32; 24] = [
-                rect.min.x, rect.min.y, tex_min_x, tex_min_y,
-                render_max_x, rect.min.y, tex_max_x, tex_min_y,
-                render_max_x, render_max_y, tex_max_x, tex_max_y,
-                rect.min.x, rect.min.y, tex_min_x, tex_min_y,
-                render_max_x, render_max_y, tex_max_x, tex_max_y,
-                rect.min.x, render_max_y, tex_min_x, tex_max_y,
-            ];
-            
-            gl.bind_vertex_array(Some(self.vao));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&verts), glow::STREAM_DRAW);
-            
-            let pos = gl.get_attrib_location(prog, "a_pos").unwrap();
-            let tc = gl.get_attrib_location(prog, "a_tc").unwrap();
-            
-            gl.enable_vertex_attrib_array(pos);
-            gl.vertex_attrib_pointer_f32(pos, 2, glow::FLOAT, false, 16, 0);
-            gl.enable_vertex_attrib_array(tc);
-            gl.vertex_attrib_pointer_f32(tc, 2, glow::FLOAT, false, 16, 8);
-            
-            gl.draw_arrays(glow::TRIANGLES, 0, 6);
-            gl.bind_vertex_array(None);
-            gl.use_program(None);
-        }
-    }
-}
-
-
-
-
 
 struct CAApp {
     // Grid state
@@ -329,85 +96,35 @@ impl CAApp {
             }
         };
 
-        // Configuration
-        let grid_width = 500;
-        let grid_height = 500;
-        let steps_per_second = 1000.0;
-        let grid_density = 0.5;
-        let num_traits = 9;
+        let config = Config::load("config.toml").unwrap_or_else(|e| {
+            eprintln!("Config error: {}", e);
+            std::process::exit(1);
+        });
 
-        let timed_simulation = false;
-        let timestep_max = 100;
-
-        let grid_width_min = 3;
-        let grid_width_max = 5000;
-
-        let grid_height_min = 3;
-        let grid_height_max = 5000;
-
-        let steps_per_second_min = 1.0;
-        let steps_per_second_max = 10000.0;
-
-        let cell_size = 1.0;
-        let cell_size_min = 0.1;
-        let cell_size_max = 100.0;
-
-        let show_values = false;
-        let show_values_minimum_cell_size = 20.0;
-
-        let color_scheme = ColorScheme::Viridis;
-        let base_color_no_actor = 0.0;
-
-        let active_mask = vec![
-            1, 1, 0,
-            0, 0, 0,
-            0, 0, 0,
-        ];
-        let initial_selected_trait = 0;
-
-        // range at initialisation for each traits
-        let initialisation_ranges = vec![ 
-            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-            (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
-        ];
-
-        // Define trait names
         let trait_names = semantic_traits_names();
 
-        // Custum rules for each traits
-        let rules: Vec<RuleFn> = vec![
-                Rules::social_energy, Rules::social_influence, Rules::conway_optimized,
-                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-                Rules::conway_optimized, Rules::conway_optimized, Rules::conway_optimized,
-        ];
-        let rules_registry = RulesRegistry::custom(rules);
+        let rules_registry = RulesRegistry::custom(config.rules);
+        let movement_registry = MovementRegistry::custom(
+            config.grid_width,
+            config.grid_height,
+            config.movement,
+        );
 
-        let movement_function: MovementFn = Movements::social_movement; 
-        let movement_registry = MovementRegistry::custom(grid_width, grid_height, movement_function);
+        let grid = Grid::new_with_density(
+            config.grid_width,
+            config.grid_height,
+            config.grid_density,
+            config.num_traits,
+            &config.initialisation_ranges,
+        );
 
-        // Initialize grid
-        let grid = Grid::new_with_density(grid_width, grid_height, grid_density, num_traits, &initialisation_ranges);
-
-        let neighborhood_traits_mask = vec![
-            vec![1, 1, 1],
-            vec![1, 1, 1],
-            vec![1, 1, 1],
-        ];
-
-        let neighborhood_mvt_mask = vec![
-            vec![1, 1, 1],
-            vec![1, 1, 1],
-            vec![1, 1, 1],
-        ];
-
-        let neighborhood_traits_height = neighborhood_traits_mask.len();
-        let neighborhood_traits_width = neighborhood_traits_mask[0].len();
+        let neighborhood_traits_height = config.neighborhood_traits_mask.len();
+        let neighborhood_traits_width = config.neighborhood_traits_mask[0].len();
         let neighborhood_traits_center_row = (neighborhood_traits_height - 1) / 2;
         let neighborhood_traits_center_col = (neighborhood_traits_width - 1) / 2;
 
-        let neighborhood_mvt_height = neighborhood_mvt_mask.len();
-        let neighborhood_mvt_width = neighborhood_mvt_mask[0].len();
+        let neighborhood_mvt_height = config.neighborhood_mvt_mask.len();
+        let neighborhood_mvt_width = config.neighborhood_mvt_mask[0].len();
         let neighborhood_mvt_center_row = (neighborhood_mvt_height - 1) / 2;
         let neighborhood_mvt_center_col = (neighborhood_mvt_width - 1) / 2;
 
@@ -416,7 +133,7 @@ impl CAApp {
             neighborhood_traits_height,
             neighborhood_traits_center_row,
             neighborhood_traits_center_col,
-            neighborhood_traits_mask,
+            config.neighborhood_traits_mask,
         );
 
         let neighborhood_mvt = Neighborhood::new(
@@ -424,7 +141,7 @@ impl CAApp {
             neighborhood_mvt_height,
             neighborhood_mvt_center_row,
             neighborhood_mvt_center_col,
-            neighborhood_mvt_mask,
+            config.neighborhood_mvt_mask,
         );
 
         // Pre-allocate next grid
@@ -437,9 +154,9 @@ impl CAApp {
             is_empty: grid.is_empty.clone(),
         };
 
-        let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
+        let rows_per_batch = std::cmp::max(1, 4000 / grid.width);
 
-        let active_traits: Vec<usize> = active_mask
+        let active_traits: Vec<usize> = config.active_mask
             .iter()
             .enumerate()
             .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
@@ -447,17 +164,17 @@ impl CAApp {
         
         Self {
             grid,
-            grid_density,
-            num_traits,
-            initialisation_ranges,
+            grid_density:config.grid_density,
+            num_traits: config.num_traits,
+            initialisation_ranges: config.initialisation_ranges,
             next_grid,
 
             timestep: 0,
-            timed_simulation,
-            timestep_max,
+            timed_simulation: config.timed_simulation,
+            timestep_max: config.timestep_max,
             start: Instant::now(),
-            is_playing: timed_simulation,
-            steps_per_second,
+            is_playing: config.timed_simulation,
+            steps_per_second: config.steps_per_second,
             time_accumulator: 0.0,
             gpu_renderer: Arc::new(Mutex::new(renderer)),
             grayscale_buffer: Vec::new(),
@@ -465,28 +182,28 @@ impl CAApp {
             last_rendered_timestep: 999999,
             avg_step_time: None,
 
-            active_mask,
+            active_mask: config.active_mask,
             active_traits,
             neighborhood_traits,
             neighborhood_mvt,
             rules_registry,
             movement_registry,
-            grid_width_min,
-            grid_width_max,
-            grid_height_min,
-            grid_height_max,
-            steps_per_second_min,
-            steps_per_second_max,
+            grid_width_min: config.grid_width_min,
+            grid_width_max: config.grid_width_max,
+            grid_height_min: config.grid_height_min,
+            grid_height_max: config.grid_height_max,
+            steps_per_second_min: config.steps_per_second_min,
+            steps_per_second_max: config.steps_per_second_max,
             rows_per_batch,
             
-            selected_trait: initial_selected_trait,
-            cell_size,
-            show_values,
-            show_values_minimum_cell_size,
-            color_scheme,
-            base_color_no_actor,
-            cell_size_min,
-            cell_size_max,
+            selected_trait: config.initial_selected_trait,
+            cell_size: config.cell_size,
+            show_values: config.show_values,
+            show_values_minimum_cell_size: config.show_values_minimum_cell_size,
+            color_scheme: config.color_scheme,
+            base_color_no_actor: config.base_color_no_actor,
+            cell_size_min: config.cell_size_min,
+            cell_size_max: config.cell_size_max,
 
             trait_names,
         }
@@ -737,11 +454,11 @@ impl eframe::App for CAApp {
             egui::ComboBox::from_id_salt("movement")
                 .selected_text(self.movement_registry.get_movement_name())
                 .show_ui(ui, |ui| {
-                    for &name in self.movement_registry.get_all_names() {
-                        if let Some(movement_fn) = self.movement_registry.get_movement_by_name(name) {
-                            let is_selected = self.movement_registry.is_stored_function(movement_fn);
+                    for &name in Movement::NAMES {
+                        if let Some(movement) = Movement::from_name(name) {
+                            let is_selected = self.movement_registry.is_stored_movement(movement);
                             if ui.selectable_label(is_selected, name).clicked() {
-                                self.movement_registry.set_movement_function(movement_fn);
+                                self.movement_registry.set_movement(movement);
                             }
                         }
                     }
@@ -788,19 +505,17 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt(format!("rule_{}", trait_idx))
                             .selected_text(self.rules_registry.get_rule_name(trait_idx))
                             .show_ui(ui, |ui| {
-                                for &name in self.rules_registry.get_all_names() {
-                                    if let Some(rule_fn) =
-                                        self.rules_registry.get_rule_by_name(name)
-                                    {
+                                for &name in Rule::NAMES {
+                                    if let Some(rule) = Rule::from_name(name) {
                                         let is_selected = self
                                             .rules_registry
-                                            .is_stored_function(trait_idx, rule_fn);
+                                            .is_stored_function(trait_idx, rule);
 
                                         if ui
                                             .selectable_label(is_selected, name)
                                             .clicked()
                                         {
-                                            self.rules_registry.set_rule(trait_idx, rule_fn);
+                                            self.rules_registry.set_rule(trait_idx, rule);
                                         }
                                     }
                                 }
@@ -852,8 +567,8 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt("color_scheme")
                             .selected_text(self.color_scheme.name())
                             .show_ui(ui, |ui| {
-                                for cs in ColorScheme::all() {
-                                    if ui.selectable_value(&mut self.color_scheme, cs, cs.name()).changed() {
+                                for cs in ColorScheme::ALL {
+                                    if ui.selectable_value(&mut self.color_scheme, *cs, cs.name()).changed() {
                                         flag_update_texture = true;
                                     }
                                 }

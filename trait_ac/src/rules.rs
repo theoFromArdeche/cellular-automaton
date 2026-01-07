@@ -3,9 +3,9 @@ use crate::grid::Grid;
 
 
 
-pub struct Rules;
+pub struct RuleFunction;
 
-impl Rules {
+impl RuleFunction {
     /// No change - cells maintain their trait value
     #[inline(always)]
     pub fn static_rule(trait_index: usize, cell_r: usize, cell_c: usize, _neighborhood_traits: &Neighborhood, grid: &Grid) -> f32 {
@@ -305,102 +305,125 @@ impl Rules {
 
 
 
-pub type RuleFn = fn(usize, usize, usize, &Neighborhood, &Grid) -> f32;
+macro_rules! define_rules {
+    ($(($variant:ident, $name:expr, $func:path)),* $(,)?) => {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub enum Rule {
+            $($variant),*
+        }
+        
+        impl Rule {
+            pub const ALL: &'static [Rule] = &[$(Rule::$variant),*];
+            pub const NAMES: &'static [&'static str] = &[$($name),*];
+            
+            #[inline]
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(Rule::$variant => $name),*
+                }
+            }
+            
+            #[inline]
+            pub fn from_name(name: &str) -> Option<Rule> {
+                match name {
+                    $($name => Some(Rule::$variant)),*,
+                    _ => None,
+                }
+            }
+            
+            #[inline]
+            pub fn get_fn(&self) -> RuleFnType {
+                match self {
+                    $(Rule::$variant => $func),*
+                }
+            }
+        }
+    };
+}
+
+// ============================================================
+// ADD NEW RULES HERE - Just add one line!
+// Format: (EnumVariant, "display name", RuleFunction::function_name)
+// ============================================================
+define_rules!(
+    (Static,          "static",           RuleFunction::static_rule),
+    (Average,         "average",          RuleFunction::average),
+    (Conway,          "conway",           RuleFunction::conway),
+    (ConwayOptimized, "conway optimized", RuleFunction::conway_optimized),
+    (Diffusion,       "diffusion",        RuleFunction::diffusion),
+    (Maximum,         "maximum",          RuleFunction::maximum),
+    (Minimum,         "minimum",          RuleFunction::minimum),
+    (WeightedAverage, "weighted_average", RuleFunction::weighted_average),
+    (SocialEnergy,    "social energy",    RuleFunction::social_energy),
+    (SocialInfluence, "social influence", RuleFunction::social_influence),
+    // Add new rules here:
+);
+
+pub type RuleFnType = fn(usize, usize, usize, &Neighborhood, &Grid) -> f32;
+
 
 #[derive(Clone)]
 pub struct RulesRegistry {
-    rules: Vec<RuleFn>,
+    rules: Vec<RuleFnType>,
+    rule_types: Vec<Rule>,
 }
-
-// Static lookup table for function pointer to name mapping
-static RULE_LOOKUP: &[(RuleFn, &str)] = &[
-    (Rules::static_rule, "static"),
-    (Rules::average, "average"),
-    (Rules::conway, "conway"),
-    (Rules::conway_optimized, "conway optimized"),
-    (Rules::diffusion, "diffusion"),
-    (Rules::maximum, "maximum"),
-    (Rules::minimum, "minimum"),
-    (Rules::weighted_average, "weighted_average"),
-    (Rules::social_energy, "social energy"),
-    (Rules::social_influence, "social influence"),
-];
-
-const RULE_COUNT: usize = RULE_LOOKUP.len();
-
-const fn extract_names<'a, const N: usize>(lookup: &'a [(RuleFn, &'a str)]) -> [&'a str; N] {
-    let mut names = [""; N];
-    let mut i = 0;
-    while i < N {
-        names[i] = lookup[i].1;
-        i += 1;
-    }
-    names
-}
-
-// Static array of just the names, extracted from lookup table
-static RULE_NAMES: [&str; RULE_COUNT] = extract_names::<RULE_COUNT>(RULE_LOOKUP);
 
 impl RulesRegistry {
     pub fn default(num_traits: usize) -> Self {
         Self {
-            rules: vec![Rules::average; num_traits],
+            rules: vec![RuleFunction::average; num_traits],
+            rule_types: vec![Rule::Average; num_traits],
         }
     }
-
-    pub fn custom(rules: Vec<RuleFn>) -> Self {
-        Self { rules }
+    
+    pub fn custom(rule_types: Vec<Rule>) -> Self {
+        let rules = rule_types.iter().map(|rt| rt.get_fn()).collect();
+        Self { rules, rule_types }
     }
-
-    /// Apply a rule by its trait index
+    
     #[inline(always)]
-    pub fn apply_rule(&self, trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+    pub fn apply_rule(&self, trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid, ) -> f32 {
         let rule = unsafe { *self.rules.get_unchecked(trait_index) };
         rule(trait_index, cell_r, cell_c, neighborhood, grid)
     }
-
-    pub fn set_rule(&mut self, trait_idx: usize, rule_fn: RuleFn) {
-        self.rules[trait_idx] = rule_fn;
+    
+    pub fn set_rule(&mut self, trait_idx: usize, rule_type: Rule) {
+        self.rules[trait_idx] = rule_type.get_fn();
+        self.rule_types[trait_idx] = rule_type;
     }
-
-    /// Get the name of the rule assigned to a trait index
+    
     #[inline]
     pub fn get_rule_name(&self, trait_index: usize) -> &'static str {
-        let rule_fn = unsafe { *self.rules.get_unchecked(trait_index) };
-        self.get_name_for_rule(rule_fn)
+        self.rule_types[trait_index].name()
     }
 
-    pub fn is_stored_function(&self, trait_index: usize, function: RuleFn) -> bool {
-        let rule_fn = unsafe { *self.rules.get_unchecked(trait_index) };
-        rule_fn as usize == function as usize
-    }
-
-    /// Get the name for a specific rule function (uses lookup table)
     #[inline]
-    pub fn get_name_for_rule(&self, rule_fn: RuleFn) -> &'static str {
-        for &(func, name) in RULE_LOOKUP {
-            if func as usize == rule_fn as usize {
-                return name;
-            }
-        }
-        "unknown"
+    pub fn get_rule(&self, trait_index: usize) -> Rule {
+        self.rule_types[trait_index]
     }
 
-    /// Get rule function by name (uses lookup table)
+    pub fn is_stored_function(&self, trait_index: usize, rule: Rule) -> bool {
+        self.rule_types[trait_index] == rule
+    }
+
     #[inline]
-    pub fn get_rule_by_name(&self, rule_name: &str) -> Option<RuleFn> {
-        for &(func, name) in RULE_LOOKUP {
-            if name == rule_name {
-                return Some(func);
-            }
-        }
-        None
+    pub fn get_name_for_rule(rule: Rule) -> &'static str {
+        rule.name()
     }
 
-    /// Get all available rule names (from lookup table)
+    #[inline]
+    pub fn get_rule_by_name(rule_name: &str) -> Option<Rule> {
+        Rule::from_name(rule_name)
+    }
+
     #[inline(always)]
-    pub fn get_all_names(&self) -> &'static [&'static str; RULE_COUNT] {
-        &RULE_NAMES
+    pub fn get_all_names() -> &'static [&'static str] {
+        Rule::NAMES
+    }
+
+    #[inline]
+    pub fn get_all_rules() -> &'static [Rule] {
+        Rule::ALL
     }
 }
 
@@ -411,7 +434,7 @@ impl RulesRegistry {
 #[cfg(test)]
 mod tests {
     use crate::grid::Grid;
-    use crate::rules::{Rules, RulesRegistry};
+    use crate::rules::{RuleFunction, RulesRegistry};
     use crate::neighborhood::Neighborhood;
 
     #[test]
@@ -424,7 +447,7 @@ mod tests {
             mask,       // mask
         );
 
-        let result = Rules::average(0, 1, 1, &neighborhood, &grid);
+        let result = RuleFunction::average(0, 1, 1, &neighborhood, &grid);
         assert!(
             (0.0..=1.0).contains(&result),
             "Average rule should produce value between 0.0 and 1.0"
@@ -441,7 +464,7 @@ mod tests {
             mask,       // mask
         );
 
-        let result = Rules::conway(0, 1, 1, &neighborhood, &grid);
+        let result = RuleFunction::conway(0, 1, 1, &neighborhood, &grid);
         assert!(
             result == 0.0 || result == 1.0,
             "Conway rule should produce 0.0 or 1.0"
@@ -478,15 +501,15 @@ mod tests {
         );
 
         let rules_registry = RulesRegistry::custom([
-            Rules::static_rule,
-            Rules::conway,
-            Rules::average,
-            Rules::average,
-            Rules::average,
-            Rules::average,
-            Rules::average,
-            Rules::average,
-            Rules::average,
+            Rule::Static,
+            Rule::Conway,
+            Rule::Average,
+            Rule::Average,
+            Rule::Average,
+            Rule::Average,
+            Rule::Average,
+            Rule::Average,
+            Rule::Average,
         ]);
 
         let result = rules_registry.apply_rule(1, 1, 1, &neighborhood, &grid);
