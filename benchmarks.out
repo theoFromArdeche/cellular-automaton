@@ -1,16 +1,16 @@
 ==================== STARTING BENCHMARKS ====================
-[2025-12-27 15:18:51] Benchmark suite started
+[2026-01-08 13:28:14] Benchmark suite started
 
 ==================== trait_ac (library) ====================
 
 ========== Perf improve 0 (base) ==========
-[2025-12-27 15:18:51] Running trait_ac version 0...
+[2026-01-08 13:28:14] Running trait_ac version 0...
     Finished `release` profile [optimized] target(s) in 0.00s
      Running `target/release/trait_ac`
 === Modular Cellular Automata Simulation ===
 
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: Conway)
@@ -18,20 +18,20 @@ Configuration:
 ============================================================
 
 Simulation complete!
-Execution time: 70.619052285s
-Performance: 1.42 timesteps/sec
-Cells/sec: 5.66M
-[2025-12-27 15:20:02] Completed trait_ac version 0
+Execution time: 153.808828584s
+Performance: 0.65 timesteps/sec
+Cells/sec: 5.85M
+[2026-01-08 13:30:49] Completed trait_ac version 0
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 1 ==========
-[2025-12-27 15:21:02] Running trait_ac version 1...
-    Finished `release` profile [optimized] target(s) in 0.04s
+[2026-01-08 13:31:49] Running trait_ac version 1...
+    Finished `release` profile [optimized] target(s) in 0.06s
      Running `target/release/trait_ac`
 === Modular Cellular Automata Simulation ===
 
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: Conway)
@@ -39,41 +39,20 @@ Configuration:
 ============================================================
 
 Simulation complete!
-Execution time: 12.275086093s
-Performance: 8.15 timesteps/sec
-Cells/sec: 32.59M
-[2025-12-27 15:21:14] Completed trait_ac version 1
+Execution time: 23.950939354s
+Performance: 4.18 timesteps/sec
+Cells/sec: 37.58M
+[2026-01-08 13:32:14] Completed trait_ac version 1
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 2 ==========
-[2025-12-27 15:22:14] Running trait_ac version 2...
-    Finished `release` profile [optimized] target(s) in 0.00s
-     Running `target/release/trait_ac`
-=== Modular Cellular Automata Simulation ===
-
-Configuration:
-  Grid: 2000x2000
-  Timesteps: 100
-  Active traits:
-    0: Energy (rule: conway)
-
-============================================================
-
-Simulation complete!
-Execution time: 12.208973478s
-Performance: 8.19 timesteps/sec
-Cells/sec: 32.76M
-[2025-12-27 15:22:27] Completed trait_ac version 2
-Waiting 1 minute before next benchmark...
-
-========== Perf improve 3 ==========
-[2025-12-27 15:23:27] Running trait_ac version 3...
+[2026-01-08 13:33:14] Running trait_ac version 2...
     Finished `release` profile [optimized] target(s) in 0.01s
      Running `target/release/trait_ac`
 === Modular Cellular Automata Simulation ===
 
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: conway)
@@ -81,41 +60,41 @@ Configuration:
 ============================================================
 
 Simulation complete!
-Execution time: 12.18279636s
-Performance: 8.21 timesteps/sec
-Cells/sec: 32.83M
-[2025-12-27 15:23:39] Completed trait_ac version 3
+Execution time: 24.063225353s
+Performance: 4.16 timesteps/sec
+Cells/sec: 37.40M
+[2026-01-08 13:33:38] Completed trait_ac version 2
+Waiting 1 minute before next benchmark...
+
+========== Perf improve 3 ==========
+[2026-01-08 13:34:38] Running trait_ac version 3...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.01s
+     Running `target/release/trait_ac`
+=== Modular Cellular Automata Simulation ===
+
+Configuration:
+  Grid: 3000x3000
+  Timesteps: 100
+  Active traits:
+    0: Energy (rule: conway)
+
+============================================================
+
+Simulation complete!
+Execution time: 11.679630254s
+Performance: 8.56 timesteps/sec
+Cells/sec: 77.06M
+[2026-01-08 13:34:50] Completed trait_ac version 3
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 4 ==========
-[2025-12-27 15:24:39] Running trait_ac version 4...
-    Finished `release` profile [optimized + debuginfo] target(s) in 0.00s
+[2026-01-08 13:35:50] Running trait_ac version 4...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.01s
      Running `target/release/trait_ac`
 === Modular Cellular Automata Simulation ===
 
 Configuration:
-  Grid: 2000x2000
-  Timesteps: 100
-  Active traits:
-    0: Energy (rule: conway)
-
-============================================================
-
-Simulation complete!
-Execution time: 5.425417129s
-Performance: 18.43 timesteps/sec
-Cells/sec: 73.73M
-[2025-12-27 15:24:45] Completed trait_ac version 4
-Waiting 1 minute before next benchmark...
-
-========== Perf improve 5 ==========
-[2025-12-27 15:25:45] Running trait_ac version 5...
-    Finished `release` profile [optimized + debuginfo] target(s) in 0.00s
-     Running `target/release/trait_ac`
-=== Modular Cellular Automata Simulation ===
-
-Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: conway optimized)
@@ -123,20 +102,41 @@ Configuration:
 ============================================================
 
 Simulation complete!
-Execution time: 846.207382ms
-Performance: 118.17 timesteps/sec
-Cells/sec: 472.70M
-[2025-12-27 15:25:46] Completed trait_ac version 5
+Execution time: 1.78573164s
+Performance: 56.00 timesteps/sec
+Cells/sec: 504.00M
+[2026-01-08 13:35:53] Completed trait_ac version 4
+Waiting 1 minute before next benchmark...
+
+========== Perf improve 5 ==========
+[2026-01-08 13:36:53] Running trait_ac version 5...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.06s
+     Running `target/release/trait_ac`
+=== Modular Cellular Automata Simulation ===
+
+Configuration:
+  Grid: 3000x3000
+  Timesteps: 100
+  Active traits:
+    0: Energy (rule: conway optimized)
+
+============================================================
+
+Simulation complete!
+Execution time: 1.466691066s
+Performance: 68.18 timesteps/sec
+Cells/sec: 613.63M
+[2026-01-08 13:36:54] Completed trait_ac version 5
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 6 ==========
-[2025-12-27 15:26:46] Running trait_ac version 6...
+[2026-01-08 13:37:54] Running trait_ac version 6...
     Finished `release` profile [optimized + debuginfo] target(s) in 0.04s
      Running `target/release/trait_ac`
 === Modular Cellular Automata Simulation ===
 
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: conway optimized)
@@ -144,147 +144,148 @@ Configuration:
 ============================================================
 
 Simulation complete!
-Execution time: 792.790772ms
-Performance: 126.14 timesteps/sec
-Cells/sec: 504.55M
-[2025-12-27 15:26:47] Completed trait_ac version 6
+Execution time: 702.622939ms
+Performance: 142.32 timesteps/sec
+Cells/sec: 1280.91M
+[2026-01-08 13:37:55] Completed trait_ac version 6
 Waiting 1 minute before next benchmark...
 
 ==================== trait_ac_ui (graphical interface) ====================
 
 ========== Perf improve 0 (base) ==========
-[2025-12-27 15:27:47] Running trait_ac_ui version 0...
-    Finished `release` profile [optimized] target(s) in 0.10s
+[2026-01-08 13:38:55] Running trait_ac_ui version 0...
+    Finished `release` profile [optimized] target(s) in 0.11s
      Running `target/release/trait_ac_ui`
 Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: Conway)
 
-Execution time: 287.071109362s
-Performance: 0.35 timesteps/sec
-Cells/sec: 1.39M
-[2025-12-27 15:32:38] Completed trait_ac_ui version 0
+Execution time: 517.042161144s
+Performance: 0.19 timesteps/sec
+Cells/sec: 1.74M
+[2026-01-08 13:47:39] Completed trait_ac_ui version 0
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 1 ==========
-[2025-12-27 15:33:38] Running trait_ac_ui version 1...
-    Finished `release` profile [optimized] target(s) in 0.12s
+[2026-01-08 13:48:39] Running trait_ac_ui version 1...
+    Finished `release` profile [optimized] target(s) in 0.37s
      Running `target/release/trait_ac_ui`
 Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: Conway)
 
-Execution time: 202.0727677s
-Performance: 0.49 timesteps/sec
-Cells/sec: 1.98M
-[2025-12-27 15:37:02] Completed trait_ac_ui version 1
+Execution time: 317.231975618s
+Performance: 0.32 timesteps/sec
+Cells/sec: 2.84M
+[2026-01-08 13:54:01] Completed trait_ac_ui version 1
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 2 ==========
-[2025-12-27 15:38:02] Running trait_ac_ui version 2...
+[2026-01-08 13:55:01] Running trait_ac_ui version 2...
+    Finished `release` profile [optimized] target(s) in 0.22s
+     Running `target/release/trait_ac_ui`
+Simulation completed at timestep 100. Closing app.
+
+============================================================
+Configuration:
+  Grid: 3000x3000
+  Timesteps: 100
+  Active traits:
+    0: Energy (rule: conway)
+
+Execution time: 30.109675584s
+Performance: 3.32 timesteps/sec
+Cells/sec: 29.89M
+[2026-01-08 13:55:32] Completed trait_ac_ui version 2
+Waiting 1 minute before next benchmark...
+
+========== Perf improve 3 ==========
+[2026-01-08 13:56:32] Running trait_ac_ui version 3...
     Finished `release` profile [optimized] target(s) in 0.16s
      Running `target/release/trait_ac_ui`
 Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: conway)
 
-Execution time: 15.900484732s
-Performance: 6.29 timesteps/sec
-Cells/sec: 25.16M
-[2025-12-27 15:38:19] Completed trait_ac_ui version 2
-Waiting 1 minute before next benchmark...
-
-========== Perf improve 3 ==========
-[2025-12-27 15:39:19] Running trait_ac_ui version 3...
-    Finished `release` profile [optimized] target(s) in 0.12s
-     Running `target/release/trait_ac_ui`
-Simulation completed at timestep 100. Closing app.
-
-============================================================
-Configuration:
-  Grid: 2000x2000
-  Timesteps: 100
-  Active traits:
-    0: Energy (rule: conway)
-
-Execution time: 15.837870523s
-Performance: 6.31 timesteps/sec
-Cells/sec: 25.26M
-[2025-12-27 15:39:35] Completed trait_ac_ui version 3
+Execution time: 20.828480061s
+Performance: 4.80 timesteps/sec
+Cells/sec: 43.21M
+[2026-01-08 13:56:55] Completed trait_ac_ui version 3
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 4 ==========
-[2025-12-27 15:40:35] Running trait_ac_ui version 4...
-    Finished `release` profile [optimized] target(s) in 0.08s
+[2026-01-08 13:57:55] Running trait_ac_ui version 4...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.16s
      Running `target/release/trait_ac_ui`
 Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
-    0: Energy (rule: conway)
+    0: Energy (rule: conway optimized)
 
-Execution time: 8.755073545s
-Performance: 11.42 timesteps/sec
-Cells/sec: 45.69M
-[2025-12-27 15:40:44] Completed trait_ac_ui version 4
+Execution time: 7.185457543s
+Performance: 13.92 timesteps/sec
+Cells/sec: 125.25M
+[2026-01-08 13:58:03] Completed trait_ac_ui version 4
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 5 ==========
-[2025-12-27 15:41:44] Running trait_ac_ui version 5...
-    Finished `release` profile [optimized + debuginfo] target(s) in 0.08s
+[2026-01-08 13:59:03] Running trait_ac_ui version 5...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.16s
      Running `target/release/trait_ac_ui`
+✓ GPU renderer initialized
 Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
+  Grid: 3000x3000
   Timesteps: 100
   Active traits:
     0: Energy (rule: conway optimized)
 
-Execution time: 2.750417658s
-Performance: 36.36 timesteps/sec
-Cells/sec: 145.43M
-[2025-12-27 15:41:47] Completed trait_ac_ui version 5
+Execution time: 3.900467291s
+Performance: 25.64 timesteps/sec
+Cells/sec: 230.74M
+[2026-01-08 13:59:08] Completed trait_ac_ui version 5
 Waiting 1 minute before next benchmark...
 
 ========== Perf improve 6 ==========
-[2025-12-27 15:42:47] Running trait_ac_ui version 6...
-    Finished `release` profile [optimized + debuginfo] target(s) in 0.08s
+[2026-01-08 14:00:08] Running trait_ac_ui version 6...
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.19s
      Running `target/release/trait_ac_ui`
 ✓ GPU renderer initialized
-Simulation completed at timestep 102. Closing app.
+Simulation completed at timestep 100. Closing app.
 
 ============================================================
 Configuration:
-  Grid: 2000x2000
-  Timesteps: 102
+  Grid: 3000x3000
+  Timesteps: 100
   Active traits:
     0: Energy (rule: conway optimized)
 
-Execution time: 1.28818305s
-Performance: 79.18 timesteps/sec
-Cells/sec: 316.73M
-[2025-12-27 15:42:49] Completed trait_ac_ui version 6
+Execution time: 2.150694652s
+Performance: 46.50 timesteps/sec
+Cells/sec: 418.47M
+[2026-01-08 14:00:11] Completed trait_ac_ui version 6
 Waiting 1 minute before next benchmark...
 
-[2025-12-27 15:43:49] Benchmark suite completed
+[2026-01-08 14:01:11] Benchmark suite completed
 ==================== FINISHED BENCHMARKS ====================
