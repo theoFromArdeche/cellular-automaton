@@ -40,9 +40,9 @@ macro_rules! define_color_schemes {
             }
 
             #[inline]
-            pub fn map_value(&self, value: f32, is_empty: bool, base_color_no_actor: f32) -> Color32 {
+            pub fn map_value(&self, value: f32, is_empty: bool, base_color_not_empty: f32) -> Color32 {
                 let v = if !is_empty {
-                    (base_color_no_actor + value * (1.0 - base_color_no_actor)).clamp(0.0, 1.0)
+                    (base_color_not_empty + value * (1.0 - base_color_not_empty)).clamp(0.0, 1.0)
                 } else {
                     0.0
                 };

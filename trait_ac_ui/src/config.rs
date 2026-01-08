@@ -93,7 +93,7 @@ pub struct Config {
     // Colors
     #[serde(deserialize_with = "deserialize_color_scheme")]
     pub color_scheme: ColorScheme,
-    pub base_color_no_actor: f32,
+    pub base_color_not_empty: f32,
 
     // Trait settings
     pub active_mask: Vec<u8>,
@@ -139,7 +139,7 @@ impl Default for Config {
             show_values_minimum_cell_size: 20.0,
 
             color_scheme: ColorScheme::Viridis,
-            base_color_no_actor: 0.0,
+            base_color_not_empty: 0.0,
 
             active_mask: vec![
                 1, 1, 0,
@@ -206,6 +206,18 @@ impl Config {
         }
         if self.active_mask.is_empty() {
             return Err("active_mask must not be empty");
+        }
+        // Check that no active bit in active_mask is at an index >= num_traits
+        let max_active_index = self.active_mask
+            .iter()
+            .enumerate()
+            .filter(|&(_, &m)| m != 0)
+            .map(|(i, _)| i)
+            .max();
+        if let Some(max_idx) = max_active_index {
+            if max_idx >= self.num_traits as usize {
+                return Err("active_mask has active traits indexes beyond 'num_traits' (only the indexes of active_mask from 0 to 'num_traits' can be used)");
+            }
         }
         if self.initialisation_ranges.is_empty() {
             return Err("initialisation_ranges must not be empty");

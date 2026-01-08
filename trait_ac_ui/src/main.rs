@@ -77,7 +77,7 @@ struct CAApp {
     show_values: bool,
     show_values_minimum_cell_size: f32,
     color_scheme: ColorScheme,
-    base_color_no_actor: f32,
+    base_color_not_empty: f32,
     cell_size_min: f32,
     cell_size_max: f32,
     
@@ -205,7 +205,7 @@ impl CAApp {
             show_values: config.show_values,
             show_values_minimum_cell_size: config.show_values_minimum_cell_size,
             color_scheme: config.color_scheme,
-            base_color_no_actor: config.base_color_no_actor,
+            base_color_not_empty: config.base_color_not_empty,
             cell_size_min: config.cell_size_min,
             cell_size_max: config.cell_size_max,
 
@@ -299,7 +299,7 @@ impl CAApp {
                     let idx = start + col;
                     let is_not_empty = (!self.grid.is_empty[idx]) as u8;
                     let trait_val = self.grid.get_cell_trait(row, col, self.selected_trait);
-                    let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
+                    let offset_val = ((self.base_color_not_empty + trait_val*(1.0-self.base_color_not_empty)) * 255.0) as u8;
 
                     *pixel = offset_val * is_not_empty;
                 }
@@ -480,22 +480,24 @@ impl eframe::App for CAApp {
             // Active Traits configuration
             ui.label("Active Traits");
             egui::Grid::new("trait_grid").show(ui, |ui| {
-                for mask_row in 0..3 {
-                    for mask_col in 0..3 {
-                        let trait_idx = mask_row * 3 + mask_col;
-
-                        // Read from mask (1 = active, 0 = inactive)
-                        let mut active = self.active_mask[trait_idx] == 1;
-
-                        if ui
-                            .checkbox(&mut active, &self.trait_names[trait_idx])
-                            .changed()
-                        {
-                            // Write back to mask
-                            self.active_mask[trait_idx] = if active { 1 } else { 0 };
-                        }
+                for trait_idx in 0..self.num_traits as usize {
+                    let mut active = self.active_mask[trait_idx] == 1;
+                    if ui
+                        .checkbox(&mut active, &self.trait_names[trait_idx])
+                        .changed()
+                    {
+                        self.active_mask[trait_idx] = if active { 1 } else { 0 };
+                        self.active_traits = self.active_mask
+                            .iter()
+                            .take(self.num_traits as usize)
+                            .enumerate()
+                            .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
+                            .collect();
                     }
-                    ui.end_row();
+                    
+                    if (trait_idx + 1) % 3 == 0 {
+                        ui.end_row();
+                    }
                 }
             });
 
@@ -586,7 +588,7 @@ impl eframe::App for CAApp {
                             });
                     });
                     let base_color_changed = ui.add(
-                        egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color")
+                        egui::Slider::new(&mut self.base_color_not_empty, 0.0..=0.5).text("Base color for non-empty cells")
                     ).changed();
                     if base_color_changed {
                         flag_update_texture = true;
@@ -744,7 +746,7 @@ impl eframe::App for CAApp {
                         let cell_color = self.color_scheme.map_value(
                             value,
                             false,
-                            self.base_color_no_actor,
+                            self.base_color_not_empty,
                         );
 
                         // Calculate luminance (perceived brightness)

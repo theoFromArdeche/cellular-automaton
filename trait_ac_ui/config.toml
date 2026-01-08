@@ -6,7 +6,7 @@ num_traits = 9
 
 
 # Simulation timing
-steps_per_second = 1000.0
+steps_per_second = 25.0
 timed_simulation = false
 timestep_max = 100
 
@@ -36,7 +36,7 @@ show_values_minimum_cell_size = 20.0
 
 # Colors
 color_scheme = "viridis"
-base_color_no_actor = 0.0
+base_color_not_empty = 0.0
 
 
 # Trait settings
