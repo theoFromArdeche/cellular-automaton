@@ -375,7 +375,8 @@ impl MovementRegistry {
 
         if self.movement == Movement::Static {
             // Swap buffers
-            next_grid.update_grid(grid);
+            std::mem::swap(&mut grid.data, &mut next_grid.data);
+            // the is_empty is never changed on the temp grid (here "grid"), the correct values are always in the normal grid (here "next_grid")
             return;
         }
 
@@ -407,7 +408,7 @@ impl MovementRegistry {
                     let c = global_idx % width;
                     
                     // Skip empty cells - BitVec: true = empty
-                    if next_grid.is_empty[global_idx] { // the is_empty is never changed on the temp grid (here "grid")
+                    if next_grid.is_empty[global_idx] { // the is_empty is never changed on the temp grid (here "grid"), the correct values are always in the normal grid (here "next_grid")
                         continue;
                     }
                     
