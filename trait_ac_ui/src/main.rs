@@ -41,6 +41,7 @@ struct CAApp {
     next_grid: Grid,
     
     // Simulation state
+    initialized: bool,
     timestep: usize,
     timed_simulation: bool,
     timestep_max: usize,
@@ -53,6 +54,7 @@ struct CAApp {
     central_panel_offset: Option<egui::Vec2>,
     last_rendered_timestep: usize,
     avg_step_time: Option<f32>,
+    simulation_time: f32,
     
     // Configuration
     active_mask: Vec<u8>,
@@ -169,10 +171,11 @@ impl CAApp {
             initialisation_ranges: config.initialisation_ranges,
             next_grid,
 
+            initialized: false,
             timestep: 0,
             timed_simulation: config.timed_simulation,
             timestep_max: config.timestep_max,
-            start: Instant::now(),
+            start: Instant::now(), // placeholder, it will be initialized in step_simulation at timestep 0
             is_playing: config.timed_simulation,
             steps_per_second: config.steps_per_second,
             time_accumulator: 0.0,
@@ -181,6 +184,7 @@ impl CAApp {
             central_panel_offset: None,
             last_rendered_timestep: 999999,
             avg_step_time: None,
+            simulation_time: 0.0,
 
             active_mask: config.active_mask,
             active_traits,
@@ -362,8 +366,10 @@ impl eframe::App for CAApp {
             }
         });
 
-        // Handle animation
-        if self.is_playing {
+        if !self.initialized {
+            self.initialized = true;
+            ctx.request_repaint();
+        } else if self.is_playing {  // Handle animation
             self.time_accumulator += ctx.input(|i| i.stable_dt);
             let step_duration = 1.0 / self.steps_per_second;
             
@@ -372,11 +378,15 @@ impl eframe::App for CAApp {
             
             // Calculate remaining time budget based on actual frame time
             // If last frame was slow, we have less budget this frame
-            let render_time_estimate = frame_time * 0.5; // Assume ~50% was rendering
+            let render_time_estimate = frame_time - self.simulation_time;
             let simulation_budget = (target_frame_time - render_time_estimate).max(0.001);
             
             let estimated_step_time = self.avg_step_time.unwrap_or(0.0001);
-            let max_steps = ((simulation_budget / estimated_step_time) as usize).max(1);
+            let max_steps = if self.timestep == 0 {
+                1
+            } else {
+                ((simulation_budget / estimated_step_time) as usize).max(1)
+            };
             
             let mut steps_taken = 0;
             let step_start = std::time::Instant::now();
@@ -388,7 +398,8 @@ impl eframe::App for CAApp {
             }
             
             if steps_taken > 0 {
-                let actual_step_time = step_start.elapsed().as_secs_f32() / steps_taken as f32;
+                self.simulation_time = step_start.elapsed().as_secs_f32();
+                let actual_step_time = self.simulation_time / steps_taken as f32;
                 self.avg_step_time = Some(match self.avg_step_time {
                     Some(avg) => avg * 0.9 + actual_step_time * 0.1,
                     None => actual_step_time,
