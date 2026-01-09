@@ -216,6 +216,162 @@ impl MovementFunction {
             moves[rng.gen_range(0..moves.len())]
         }
     }
+
+    /// Movement: confident agents seek wealthy neighbors
+    /// Unconfident agents flee, risk tolerance affects mobility
+    pub fn financial_movement(cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> (isize, isize) {
+        let wealth = grid.get_cell_trait(cell_r, cell_c, 0);
+        let confidence = grid.get_cell_trait(cell_r, cell_c, 1);
+        let risk_tolerance = grid.get_cell_trait(cell_r, cell_c, 2);
+        
+        // Low risk tolerance: more likely to stay put
+        let mut rng = rand::thread_rng();
+        if rng.gen_range(0.0..=1.0) > risk_tolerance * 0.5 + 0.3 {
+            return (0, 0);
+        }
+        
+        // Very low wealth: desperate, random movement seeking opportunity
+        if wealth < 0.15 {
+            let moves = [(0,1), (0,-1), (1,0), (-1,0), (0,0)];
+            return moves[rng.gen_range(0..moves.len())];
+        }
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut wealth_dr: f32 = 0.0;
+        let mut wealth_dc: f32 = 0.0;
+        let mut crowd_dr: f32 = 0.0;
+        let mut crowd_dc: f32 = 0.0;
+        let mut has_neighbors = false;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        let dr = mask_r as f32 - center_row as f32;
+                        let dc = mask_c as f32 - center_col as f32;
+                        
+                        let neighbor_wealth = grid.get_cell_trait(grid_r, grid_c, 0);
+                        
+                        // Direction toward wealthy neighbors (weighted by their wealth)
+                        wealth_dr += dr * neighbor_wealth;
+                        wealth_dc += dc * neighbor_wealth;
+                        
+                        // Direction toward any neighbor (crowd)
+                        crowd_dr += dr;
+                        crowd_dc += dc;
+                        
+                        has_neighbors = true;
+                    }
+                }
+            }
+        }
+        
+        if !has_neighbors {
+            // No neighbors: random walk
+            let moves = [(0,1), (0,-1), (1,0), (-1,0), (0,0)];
+            return moves[rng.gen_range(0..moves.len())];
+        }
+        
+        // Confident: move toward wealth (want to join winners)
+        // Unconfident: move away from crowd (flee the market)
+        let (target_dr, target_dc) = if confidence > 0.5 {
+            (wealth_dr, wealth_dc)
+        } else {
+            (-crowd_dr, -crowd_dc)
+        };
+        
+        let dr = if target_dr.abs() < 0.001 {
+            [-1, 0, 1][rng.gen_range(0..3)]
+        } else {
+            target_dr.signum() as isize
+        };
+        
+        let dc = if target_dc.abs() < 0.001 {
+            [-1, 0, 1][rng.gen_range(0..3)]
+        } else {
+            target_dc.signum() as isize
+        };
+        
+        // Prevent diagonal bias
+        if dr != 0 && dc != 0 {
+            if rng.gen_bool(0.5) {
+                if rng.gen_bool(0.5) {
+                    return (dr, 0);
+                } else {
+                    return (0, dc);
+                }
+            }
+        }
+        
+        (dr, dc)
+    }
+
+    pub fn custom2(cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> (isize, isize) {
+        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
+        let phase = grid.get_cell_trait(cell_r, cell_c, 2);
+        let charge = grid.get_cell_trait(cell_r, cell_c, 1);
+        
+        // Movement gated by phase (creates pulses)
+        // AND minimum energy to move
+        if phase < 0.4 || phase > 0.8 || energy < 0.2 {
+            return (0, 0);
+        }
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut move_dr: f32 = 0.0;
+        let mut move_dc: f32 = 0.0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        let neighbor_energy = grid.get_cell_trait(grid_r, grid_c, 0);
+                        let neighbor_charge = grid.get_cell_trait(grid_r, grid_c, 1);
+                        
+                        let dr = mask_r as f32 - center_row as f32;
+                        let dc = mask_c as f32 - center_col as f32;
+                        
+                        // Attract to similar charge with high energy
+                        // Repel from opposite charge
+                        let charge_diff = (charge - neighbor_charge).abs();
+                        let attraction = (0.5 - charge_diff) * neighbor_energy;
+                        
+                        move_dr += dr * attraction;
+                        move_dc += dc * attraction;
+                    }
+                }
+            }
+        }
+        
+        let mut rng = rand::thread_rng();
+        
+        if move_dr.abs() > 0.05 || move_dc.abs() > 0.05 {
+            let dr = if move_dr.abs() < 0.05 { 0 } else { move_dr.signum() as isize };
+            let dc = if move_dc.abs() < 0.05 { 0 } else { move_dc.signum() as isize };
+            
+            if dr != 0 && dc != 0 && rng.gen_bool(0.5) {
+                if rng.gen_bool(0.5) { (dr, 0) } else { (0, dc) }
+            } else {
+                (dr, dc)
+            }
+        } else {
+            // Weak random drift
+            if rng.gen_bool(0.3) {
+                let moves = [(0,1), (0,-1), (1,0), (-1,0)];
+                moves[rng.gen_range(0..moves.len())]
+            } else {
+                (0, 0)
+            }
+        }
+    }
 }
 
 
@@ -266,6 +422,8 @@ define_movements!(
     (Gradient,      "gradient",        MovementFunction::gradient),
     (AvoidCrowding, "avoid crowding",  MovementFunction::avoid_crowding),
     (Social,        "social movement", MovementFunction::social_movement),
+    (Financial,        "financial", MovementFunction::financial_movement),
+    (Custom2,        "custom2", MovementFunction::custom2),
     // Add new movements here:
 );
 
@@ -375,7 +533,8 @@ impl MovementRegistry {
 
         if self.movement == Movement::Static {
             // Swap buffers
-            next_grid.update_grid(grid);
+            std::mem::swap(&mut grid.data, &mut next_grid.data);
+            // the is_empty is never changed on the temp grid (here "grid"), the correct values are always in the normal grid (here "next_grid")
             return;
         }
 
@@ -407,7 +566,7 @@ impl MovementRegistry {
                     let c = global_idx % width;
                     
                     // Skip empty cells - BitVec: true = empty
-                    if next_grid.is_empty[global_idx] { // the is_empty is never changed on the temp grid (here "grid")
+                    if next_grid.is_empty[global_idx] { // the is_empty is never changed on the temp grid (here "grid"), the correct values are always in the normal grid (here "next_grid")
                         continue;
                     }
                     
