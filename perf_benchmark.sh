@@ -6,9 +6,9 @@ set -e
 # I modified some versions slightly to add a test mode
 # You need to have all the versions in the same dir as this version
 ###############################################################################
-
+cd "../benchmarks-projet-automates-cellulaire"
 echo "==================== BUILDING ===================="
-cd ../perf-improve-0/trait_ac_ui
+cd perf-improve-0/trait_ac_ui
 cargo build --release
 cd ../trait_ac
 cargo build --release
@@ -95,6 +95,5 @@ run_benchmark() {
     
     echo ""
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Benchmark suite completed"
-    cd ../../projet-automates-cellulaires
     echo "==================== FINISHED BENCHMARKS ===================="
-} 2>&1 | tee ../../projet-automates-cellulaires/benchmarks.out
+} 2>&1 | tee ../../../projet-automates-cellulaires/benchmarks.out

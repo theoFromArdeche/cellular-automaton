@@ -41,6 +41,7 @@ struct CAApp {
     next_grid: Grid,
     
     // Simulation state
+    initialized: bool,
     timestep: usize,
     timed_simulation: bool,
     timestep_max: usize,
@@ -53,6 +54,7 @@ struct CAApp {
     central_panel_offset: Option<egui::Vec2>,
     last_rendered_timestep: usize,
     avg_step_time: Option<f32>,
+    simulation_time: f32,
     
     // Configuration
     active_mask: Vec<u8>,
@@ -74,8 +76,11 @@ struct CAApp {
     cell_size: f32,
     show_values: bool,
     show_values_minimum_cell_size: f32,
+    show_stats: bool,
     color_scheme: ColorScheme,
-    base_color_no_actor: f32,
+    base_color_not_empty: f32,
+    base_color_not_empty_min: f32,
+    base_color_not_empty_max: f32,
     cell_size_min: f32,
     cell_size_max: f32,
     
@@ -169,10 +174,11 @@ impl CAApp {
             initialisation_ranges: config.initialisation_ranges,
             next_grid,
 
+            initialized: false,
             timestep: 0,
             timed_simulation: config.timed_simulation,
             timestep_max: config.timestep_max,
-            start: Instant::now(),
+            start: Instant::now(), // placeholder, it will be initialized in step_simulation at timestep 0
             is_playing: config.timed_simulation,
             steps_per_second: config.steps_per_second,
             time_accumulator: 0.0,
@@ -181,6 +187,7 @@ impl CAApp {
             central_panel_offset: None,
             last_rendered_timestep: 999999,
             avg_step_time: None,
+            simulation_time: 0.0,
 
             active_mask: config.active_mask,
             active_traits,
@@ -200,8 +207,11 @@ impl CAApp {
             cell_size: config.cell_size,
             show_values: config.show_values,
             show_values_minimum_cell_size: config.show_values_minimum_cell_size,
+            show_stats: config.show_stats,
             color_scheme: config.color_scheme,
-            base_color_no_actor: config.base_color_no_actor,
+            base_color_not_empty: config.base_color_not_empty,
+            base_color_not_empty_min: config.base_color_not_empty_min,
+            base_color_not_empty_max: config.base_color_not_empty_max,
             cell_size_min: config.cell_size_min,
             cell_size_max: config.cell_size_max,
 
@@ -295,7 +305,7 @@ impl CAApp {
                     let idx = start + col;
                     let is_not_empty = (!self.grid.is_empty[idx]) as u8;
                     let trait_val = self.grid.get_cell_trait(row, col, self.selected_trait);
-                    let offset_val = ((self.base_color_no_actor + trait_val*(1.0-self.base_color_no_actor)) * 255.0) as u8;
+                    let offset_val = ((self.base_color_not_empty + trait_val*(1.0-self.base_color_not_empty)) * 255.0) as u8;
 
                     *pixel = offset_val * is_not_empty;
                 }
@@ -362,8 +372,10 @@ impl eframe::App for CAApp {
             }
         });
 
-        // Handle animation
-        if self.is_playing {
+        if !self.initialized {
+            self.initialized = true;
+            ctx.request_repaint();
+        } else if self.is_playing {  // Handle animation
             self.time_accumulator += ctx.input(|i| i.stable_dt);
             let step_duration = 1.0 / self.steps_per_second;
             
@@ -372,11 +384,15 @@ impl eframe::App for CAApp {
             
             // Calculate remaining time budget based on actual frame time
             // If last frame was slow, we have less budget this frame
-            let render_time_estimate = frame_time * 0.5; // Assume ~50% was rendering
+            let render_time_estimate = frame_time - self.simulation_time;
             let simulation_budget = (target_frame_time - render_time_estimate).max(0.001);
             
             let estimated_step_time = self.avg_step_time.unwrap_or(0.0001);
-            let max_steps = ((simulation_budget / estimated_step_time) as usize).max(1);
+            let max_steps = if self.timestep == 0 {
+                1
+            } else {
+                ((simulation_budget / estimated_step_time) as usize).max(1)
+            };
             
             let mut steps_taken = 0;
             let step_start = std::time::Instant::now();
@@ -388,7 +404,8 @@ impl eframe::App for CAApp {
             }
             
             if steps_taken > 0 {
-                let actual_step_time = step_start.elapsed().as_secs_f32() / steps_taken as f32;
+                self.simulation_time = step_start.elapsed().as_secs_f32();
+                let actual_step_time = self.simulation_time / steps_taken as f32;
                 self.avg_step_time = Some(match self.avg_step_time {
                     Some(avg) => avg * 0.9 + actual_step_time * 0.1,
                     None => actual_step_time,
@@ -469,22 +486,24 @@ impl eframe::App for CAApp {
             // Active Traits configuration
             ui.label("Active Traits");
             egui::Grid::new("trait_grid").show(ui, |ui| {
-                for mask_row in 0..3 {
-                    for mask_col in 0..3 {
-                        let trait_idx = mask_row * 3 + mask_col;
-
-                        // Read from mask (1 = active, 0 = inactive)
-                        let mut active = self.active_mask[trait_idx] == 1;
-
-                        if ui
-                            .checkbox(&mut active, &self.trait_names[trait_idx])
-                            .changed()
-                        {
-                            // Write back to mask
-                            self.active_mask[trait_idx] = if active { 1 } else { 0 };
-                        }
+                for trait_idx in 0..self.num_traits as usize {
+                    let mut active = self.active_mask[trait_idx] == 1;
+                    if ui
+                        .checkbox(&mut active, &self.trait_names[trait_idx])
+                        .changed()
+                    {
+                        self.active_mask[trait_idx] = if active { 1 } else { 0 };
+                        self.active_traits = self.active_mask
+                            .iter()
+                            .take(self.num_traits as usize)
+                            .enumerate()
+                            .filter_map(|(i, &m)| if m != 0 { Some(i) } else { None })
+                            .collect();
                     }
-                    ui.end_row();
+                    
+                    if (trait_idx + 1) % 3 == 0 {
+                        ui.end_row();
+                    }
                 }
             });
 
@@ -548,16 +567,17 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt("trait_select")
                             .selected_text(&self.trait_names[self.selected_trait])
                             .show_ui(ui, |ui| {
-                                for trait_idx in 0..self.num_traits{
+                                for trait_idx in 0..self.num_traits {
                                     if self.active_mask[trait_idx] == 0 {
                                         continue;
                                     }
-
-                                    ui.selectable_value(
+                                    if ui.selectable_value(
                                         &mut self.selected_trait,
                                         trait_idx,
                                         &self.trait_names[trait_idx],
-                                    );
+                                    ).changed() {
+                                        flag_update_texture = true;
+                                    }
                                 }
                             });
                     });
@@ -575,7 +595,7 @@ impl eframe::App for CAApp {
                             });
                     });
                     let base_color_changed = ui.add(
-                        egui::Slider::new(&mut self.base_color_no_actor, 0.0..=0.5).text("Empty cell base color")
+                        egui::Slider::new(&mut self.base_color_not_empty, self.base_color_not_empty_min..=self.base_color_not_empty_max).text("Base color for non-empty cells")
                     ).changed();
                     if base_color_changed {
                         flag_update_texture = true;
@@ -589,32 +609,59 @@ impl eframe::App for CAApp {
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
 
-                    // --- Trait Statistics ---
-                    ui.label("Statistics");
-                    let fill_percentage = self.grid.get_fill_percentage();
-                    ui.label(format!("  density: {:.3}", fill_percentage));
+                    ui.checkbox(&mut self.show_stats, "Show Statistics");
                     ui.separator();
-                    egui::ScrollArea::vertical()
-                        .max_height(300.0) // adjust as needed
-                        .show(ui, |ui| {
-                            for trait_idx in 0..self.num_traits {
-                                // Skip inactive traits
-                                if self.active_mask[trait_idx] == 0 {
-                                    continue;
+
+                    // --- Trait Statistics ---
+                    if self.show_stats {
+                        ui.label("Statistics");
+                        let fill_percentage = self.grid.get_fill_percentage();
+                        ui.label(format!("  density: {:.3}", fill_percentage));
+                        ui.separator();
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                for trait_idx in 0..self.num_traits {
+                                    // Skip inactive traits
+                                    if self.active_mask[trait_idx] == 0 {
+                                        continue;
+                                    }
+                                    let values = self.grid.get_trait_slice(trait_idx);
+                                    let total_count = values.len();
+                                    
+                                    // Normal average (all values)
+                                    let avg = values.iter().sum::<f32>() / total_count as f32;
+                                    
+                                    // Filter non-zero values
+                                    let non_zero_values: Vec<f32> = values.iter().cloned().filter(|&v| v > 0.001).collect();
+                                    let non_zero_count = non_zero_values.len();
+                                    
+                                    // Density: proportion of non-zero cells
+                                    let trait_density = non_zero_count as f32 / total_count as f32;
+                                    
+                                    // Average of non-zero values only
+                                    let avg_non_zero = if non_zero_count > 0 {
+                                        non_zero_values.iter().sum::<f32>() / non_zero_count as f32
+                                    } else {
+                                        0.0
+                                    };
+                                    
+                                    // Min/max of non-zero values
+                                    let min = non_zero_values.iter().cloned().fold(f32::INFINITY, f32::min);
+                                    let max = non_zero_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                                    
+                                    ui.label(format!("{}:", self.trait_names[trait_idx]));
+                                    ui.label(format!("  density: {:.3} ({}/{})", trait_density, non_zero_count, total_count));
+                                    if non_zero_count > 0 {
+                                        ui.label(format!("  (non-zero) min: {:.3}, max: {:.3}", min, max));
+                                    } else {
+                                        ui.label(format!("  (non-zero) min: , max: "));
+                                    }
+                                    ui.label(format!("  avg: {:.3}, avg (non-zero): {:.3}", avg, avg_non_zero));
+                                    ui.separator();
                                 }
-
-                                let values = self.grid.get_trait_slice(trait_idx);
-
-                                let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
-                                let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                                let avg = values.iter().sum::<f32>() / values.len() as f32;
-
-                                ui.label(format!("{}:", self.trait_names[trait_idx]));
-                                ui.label(format!("  min: {:.3}, max: {:.3}", min, max));
-                                ui.label(format!("  avg: {:.3}", avg));
-                                ui.separator();
-                            }
-                        });
+                            });
+                    }
                 });
             });
 
@@ -733,7 +780,7 @@ impl eframe::App for CAApp {
                         let cell_color = self.color_scheme.map_value(
                             value,
                             false,
-                            self.base_color_no_actor,
+                            self.base_color_not_empty,
                         );
 
                         // Calculate luminance (perceived brightness)

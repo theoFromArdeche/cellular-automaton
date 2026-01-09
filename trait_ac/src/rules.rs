@@ -485,6 +485,330 @@ impl RuleFunction {
             }
         }
     }
+
+    // Trait indices:
+    // 0 = Wealth
+    // 1 = Confidence  
+    // 2 = Risk Tolerance
+
+    /// Wealth changes based on confidence alignment with neighbors
+    /// You gain when your confidence matches the crowd, lose when misaligned
+    pub fn wealth_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let wealth = grid.get_cell_trait(cell_r, cell_c, 0);
+        let confidence = grid.get_cell_trait(cell_r, cell_c, 1);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut neighbor_confidence_sum: f32 = 0.0;
+        let mut neighbor_count: usize = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        neighbor_confidence_sum += grid.get_cell_trait(grid_r, grid_c, 1);
+                        neighbor_count += 1;
+                    }
+                }
+            }
+        }
+        
+        if neighbor_count == 0 {
+            // Alone: slight decay, no market to trade with
+            return (wealth * 0.98).clamp(0.0, 1.0);
+        }
+        
+        let avg_neighbor_confidence = neighbor_confidence_sum / neighbor_count as f32;
+        
+        // Both confident = bull market, both gain
+        // Both unconfident = bear market, both slowly lose
+        // Misaligned = one bought what other sold, transfer happens
+        
+        let market_sentiment = avg_neighbor_confidence;
+        let alignment = 1.0 - (confidence - market_sentiment).abs();
+        
+        // Gain/loss based on: are you confident in a confident market?
+        let gain = if confidence > 0.5 && market_sentiment > 0.5 {
+            // Bull market, you're in: gain
+            0.05 * alignment
+        } else if confidence < 0.5 && market_sentiment < 0.5 {
+            // Bear market, you're out: small loss (opportunity cost of sitting out)
+            -0.01
+        } else if confidence > market_sentiment {
+            // You're more confident than market: risky, could lose
+            -0.08 * (confidence - market_sentiment)
+        } else {
+            // You're less confident than market: missed gains
+            -0.02 * (market_sentiment - confidence)
+        };
+        
+        (wealth + gain).clamp(0.0, 1.0)
+    }
+
+
+    /// Confidence spreads through neighbors (herding) and reacts to wealth
+    /// Risk tolerance amplifies swings
+    pub fn confidence_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let wealth = grid.get_cell_trait(cell_r, cell_c, 0);
+        let confidence = grid.get_cell_trait(cell_r, cell_c, 1);
+        let risk_tolerance = grid.get_cell_trait(cell_r, cell_c, 2);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut neighbor_confidence_sum: f32 = 0.0;
+        let mut neighbor_wealth_sum: f32 = 0.0;
+        let mut neighbor_count: usize = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        neighbor_confidence_sum += grid.get_cell_trait(grid_r, grid_c, 1);
+                        neighbor_wealth_sum += grid.get_cell_trait(grid_r, grid_c, 0);
+                        neighbor_count += 1;
+                    }
+                }
+            }
+        }
+        
+        let mut new_confidence = confidence;
+        
+        // Herding: drift toward neighbor average
+        if neighbor_count > 0 {
+            let avg_neighbor_confidence = neighbor_confidence_sum / neighbor_count as f32;
+            let herd_strength = 0.15; // How much neighbors influence you
+            new_confidence = confidence * (1.0 - herd_strength) + avg_neighbor_confidence * herd_strength;
+            
+            // Seeing wealthy neighbors boosts confidence
+            let avg_neighbor_wealth = neighbor_wealth_sum / neighbor_count as f32;
+            if avg_neighbor_wealth > 0.6 {
+                new_confidence += 0.05;
+            }
+        }
+        
+        // Personal wealth feedback: wealth changes affect confidence
+        // High wealth = more confident, low wealth = less confident
+        let wealth_influence = (wealth - 0.5) * 0.1;
+        new_confidence += wealth_influence;
+        
+        // Risk tolerance amplifies: high risk = confidence swings more
+        // Move confidence further from 0.5 based on risk tolerance
+        let deviation = new_confidence - 0.5;
+        let amplified_deviation = deviation * (0.8 + risk_tolerance * 0.4);
+        new_confidence = 0.5 + amplified_deviation;
+        
+        new_confidence.clamp(0.0, 1.0)
+    }
+
+
+    /// Risk tolerance slowly adapts based on outcomes
+    /// Winners become bolder, losers become cautious
+    /// Slight neighbor influence (culture)
+    pub fn risk_tolerance_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let wealth = grid.get_cell_trait(cell_r, cell_c, 0);
+        let risk_tolerance = grid.get_cell_trait(cell_r, cell_c, 2);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut neighbor_risk_sum: f32 = 0.0;
+        let mut neighbor_count: usize = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        neighbor_risk_sum += grid.get_cell_trait(grid_r, grid_c, 2);
+                        neighbor_count += 1;
+                    }
+                }
+            }
+        }
+        
+        let mut new_risk = risk_tolerance;
+        
+        // Wealth feedback: wealthy = bolder, poor = cautious
+        // This is SLOW adaptation (0.02 factor)
+        let wealth_signal = (wealth - 0.5) * 0.02;
+        new_risk += wealth_signal;
+        
+        // Slight neighbor influence (risk culture spreads slowly)
+        if neighbor_count > 0 {
+            let avg_neighbor_risk = neighbor_risk_sum / neighbor_count as f32;
+            let culture_strength = 0.05;
+            new_risk = new_risk * (1.0 - culture_strength) + avg_neighbor_risk * culture_strength;
+        }
+        
+        // Mean reversion: extreme risk tolerance slowly drifts toward 0.5
+        // This prevents everyone becoming permanently risk-averse after crashes
+        let mean_reversion = (0.5 - new_risk) * 0.01;
+        new_risk += mean_reversion;
+        
+        new_risk.clamp(0.0, 1.0)
+    }
+
+
+    pub fn energy_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
+        let phase = grid.get_cell_trait(cell_r, cell_c, 2);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut friction: f32 = 0.0;
+        let mut neighbor_energy_sum: f32 = 0.0;
+        let mut neighbor_count = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        neighbor_count += 1;
+                        
+                        let neighbor_phase = grid.get_cell_trait(grid_r, grid_c, 2);
+                        let neighbor_energy = grid.get_cell_trait(grid_r, grid_c, 0);
+                        
+                        // Phase difference creates friction (energy generation)
+                        let phase_diff = (phase - neighbor_phase).abs();
+                        let cyclic_diff = phase_diff.min(1.0 - phase_diff);
+                        friction += cyclic_diff;
+                        
+                        neighbor_energy_sum += neighbor_energy;
+                    }
+                }
+            }
+        }
+        
+        let mut new_energy = energy;
+        
+        // Small constant decay
+        new_energy -= 0.02;
+        
+        if neighbor_count > 0 {
+            // Friction generates energy (phase differences)
+            let avg_friction = friction / neighbor_count as f32;
+            new_energy += avg_friction * 0.15;
+            
+            // Diffusion: average with neighbors
+            let avg_neighbor_energy = neighbor_energy_sum / neighbor_count as f32;
+            new_energy = new_energy * 0.7 + avg_neighbor_energy * 0.3;
+        }
+        
+        new_energy.clamp(0.0, 1.0)
+    }
+
+    pub fn charge_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let charge = grid.get_cell_trait(cell_r, cell_c, 1);
+        let energy = grid.get_cell_trait(cell_r, cell_c, 0);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut high_energy_charge_sum: f32 = 0.0;
+        let mut high_energy_count = 0;
+        let mut low_energy_charge_sum: f32 = 0.0;
+        let mut low_energy_count = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        let neighbor_charge = grid.get_cell_trait(grid_r, grid_c, 1);
+                        let neighbor_energy = grid.get_cell_trait(grid_r, grid_c, 0);
+                        
+                        if neighbor_energy > energy {
+                            high_energy_charge_sum += neighbor_charge;
+                            high_energy_count += 1;
+                        } else {
+                            low_energy_charge_sum += neighbor_charge;
+                            low_energy_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        let mut new_charge = charge;
+        
+        // Move toward charge of higher-energy neighbors
+        // Move away from charge of lower-energy neighbors
+        if high_energy_count > 0 {
+            let high_avg = high_energy_charge_sum / high_energy_count as f32;
+            new_charge += (high_avg - charge) * 0.1;
+        }
+        
+        if low_energy_count > 0 {
+            let low_avg = low_energy_charge_sum / low_energy_count as f32;
+            new_charge -= (low_avg - charge) * 0.05; // Weaker repulsion
+        }
+        
+        new_charge.clamp(0.0, 1.0)
+    }
+
+    pub fn phase_update(_trait_index: usize, cell_r: usize, cell_c: usize, neighborhood: &Neighborhood, grid: &Grid) -> f32 {
+        let phase = grid.get_cell_trait(cell_r, cell_c, 2);
+        let charge = grid.get_cell_trait(cell_r, cell_c, 1);
+        
+        let center_row = neighborhood.center_row;
+        let center_col = neighborhood.center_col;
+        
+        let mut sync_pull: f32 = 0.0;
+        let mut neighbor_count = 0;
+        
+        for mask_r in 0..neighborhood.height {
+            for mask_c in 0..neighborhood.width {
+                if neighborhood.is_valid(mask_r, mask_c) == 1 
+                && !(mask_r == center_row && mask_c == center_col) {
+                    let (grid_r, grid_c) = neighborhood.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+                    if !grid.is_cell_empty(grid_r, grid_c) {
+                        neighbor_count += 1;
+                        
+                        let neighbor_phase = grid.get_cell_trait(grid_r, grid_c, 2);
+                        let neighbor_charge = grid.get_cell_trait(grid_r, grid_c, 1);
+                        
+                        // Phase difference (cyclic)
+                        let diff = neighbor_phase - phase;
+                        let cyclic_diff = if diff > 0.5 {
+                            diff - 1.0
+                        } else if diff < -0.5 {
+                            diff + 1.0
+                        } else {
+                            diff
+                        };
+                        
+                        // Similar charge = sync together
+                        // Opposite charge = anti-sync (push phases apart)
+                        let charge_similarity = 1.0 - (charge - neighbor_charge).abs();
+                        let coupling = (charge_similarity - 0.5) * 2.0; // -1 to 1
+                        
+                        sync_pull += cyclic_diff * coupling;
+                    }
+                }
+            }
+        }
+        
+        // Natural advance
+        let mut new_phase = phase + 0.07;
+        
+        // Apply sync/anti-sync
+        if neighbor_count > 0 {
+            new_phase += (sync_pull / neighbor_count as f32) * 0.12;
+        }
+        
+        new_phase.rem_euclid(1.0)
+    }
 }
 
 
@@ -541,6 +865,12 @@ define_rules!(
     (WeightedAverage, "weighted_average", RuleFunction::weighted_average),
     (SocialEnergy,    "social energy",    RuleFunction::social_energy),
     (SocialInfluence, "social influence", RuleFunction::social_influence),
+    (Wealth, "wealth", RuleFunction::wealth_update),
+    (Confidence, "confidence", RuleFunction::confidence_update),
+    (RiskTolerance, "risk tolerance", RuleFunction::risk_tolerance_update),
+    (Energy, "energy", RuleFunction::energy_update),
+    (Charge, "charge", RuleFunction::charge_update),
+    (Phase, "phase", RuleFunction::phase_update),
     (LocalMajority,   "local majority",   RuleFunction::local_majority),
     (PanicThreshold,  "panic threshold",  RuleFunction::panic_threshold),
     (LuxMarchesi,     "lux marchesi",     RuleFunction::lux_marchesi),

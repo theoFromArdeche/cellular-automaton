@@ -95,8 +95,8 @@ pub fn default_traits_names() -> Vec<String> {
 pub fn semantic_traits_names() -> Vec<String> {
     vec![
         "Energy".to_string(),
-        "Social".to_string(),
-        "Color/Team".to_string(),
+        "Charge".to_string(),
+        "Phase".to_string(),
         "Aggression".to_string(),
         "Stability".to_string(),
         "Mobility".to_string(),
