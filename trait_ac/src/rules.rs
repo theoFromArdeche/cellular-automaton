@@ -416,13 +416,13 @@ impl RuleFunction {
 
         let seller_ratio = sellers as f32 / total as f32;
         if seller_ratio > THETA {
-            -1.0
+            0.0
         } else {
             let buyer_ratio = buyers as f32 / total as f32;
             if buyer_ratio > THETA {
                 1.0
             } else {
-                0.0
+                0.5
             }
         }
     }
