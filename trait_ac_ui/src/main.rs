@@ -76,8 +76,11 @@ struct CAApp {
     cell_size: f32,
     show_values: bool,
     show_values_minimum_cell_size: f32,
+    show_stats: bool,
     color_scheme: ColorScheme,
     base_color_not_empty: f32,
+    base_color_not_empty_min: f32,
+    base_color_not_empty_max: f32,
     cell_size_min: f32,
     cell_size_max: f32,
     
@@ -204,8 +207,11 @@ impl CAApp {
             cell_size: config.cell_size,
             show_values: config.show_values,
             show_values_minimum_cell_size: config.show_values_minimum_cell_size,
+            show_stats: config.show_stats,
             color_scheme: config.color_scheme,
             base_color_not_empty: config.base_color_not_empty,
+            base_color_not_empty_min: config.base_color_not_empty_min,
+            base_color_not_empty_max: config.base_color_not_empty_max,
             cell_size_min: config.cell_size_min,
             cell_size_max: config.cell_size_max,
 
@@ -561,16 +567,17 @@ impl eframe::App for CAApp {
                         egui::ComboBox::from_id_salt("trait_select")
                             .selected_text(&self.trait_names[self.selected_trait])
                             .show_ui(ui, |ui| {
-                                for trait_idx in 0..self.num_traits{
+                                for trait_idx in 0..self.num_traits {
                                     if self.active_mask[trait_idx] == 0 {
                                         continue;
                                     }
-
-                                    ui.selectable_value(
+                                    if ui.selectable_value(
                                         &mut self.selected_trait,
                                         trait_idx,
                                         &self.trait_names[trait_idx],
-                                    );
+                                    ).changed() {
+                                        flag_update_texture = true;
+                                    }
                                 }
                             });
                     });
@@ -588,7 +595,7 @@ impl eframe::App for CAApp {
                             });
                     });
                     let base_color_changed = ui.add(
-                        egui::Slider::new(&mut self.base_color_not_empty, 0.0..=0.5).text("Base color for non-empty cells")
+                        egui::Slider::new(&mut self.base_color_not_empty, self.base_color_not_empty_min..=self.base_color_not_empty_max).text("Base color for non-empty cells")
                     ).changed();
                     if base_color_changed {
                         flag_update_texture = true;
@@ -602,32 +609,59 @@ impl eframe::App for CAApp {
                     ui.checkbox(&mut self.show_values, "Show Values");
                     ui.separator();
 
-                    // --- Trait Statistics ---
-                    ui.label("Statistics");
-                    let fill_percentage = self.grid.get_fill_percentage();
-                    ui.label(format!("  density: {:.3}", fill_percentage));
+                    ui.checkbox(&mut self.show_stats, "Show Statistics");
                     ui.separator();
-                    egui::ScrollArea::vertical()
-                        .max_height(300.0) // adjust as needed
-                        .show(ui, |ui| {
-                            for trait_idx in 0..self.num_traits {
-                                // Skip inactive traits
-                                if self.active_mask[trait_idx] == 0 {
-                                    continue;
+
+                    // --- Trait Statistics ---
+                    if self.show_stats {
+                        ui.label("Statistics");
+                        let fill_percentage = self.grid.get_fill_percentage();
+                        ui.label(format!("  density: {:.3}", fill_percentage));
+                        ui.separator();
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                for trait_idx in 0..self.num_traits {
+                                    // Skip inactive traits
+                                    if self.active_mask[trait_idx] == 0 {
+                                        continue;
+                                    }
+                                    let values = self.grid.get_trait_slice(trait_idx);
+                                    let total_count = values.len();
+                                    
+                                    // Normal average (all values)
+                                    let avg = values.iter().sum::<f32>() / total_count as f32;
+                                    
+                                    // Filter non-zero values
+                                    let non_zero_values: Vec<f32> = values.iter().cloned().filter(|&v| v > 0.001).collect();
+                                    let non_zero_count = non_zero_values.len();
+                                    
+                                    // Density: proportion of non-zero cells
+                                    let trait_density = non_zero_count as f32 / total_count as f32;
+                                    
+                                    // Average of non-zero values only
+                                    let avg_non_zero = if non_zero_count > 0 {
+                                        non_zero_values.iter().sum::<f32>() / non_zero_count as f32
+                                    } else {
+                                        0.0
+                                    };
+                                    
+                                    // Min/max of non-zero values
+                                    let min = non_zero_values.iter().cloned().fold(f32::INFINITY, f32::min);
+                                    let max = non_zero_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                                    
+                                    ui.label(format!("{}:", self.trait_names[trait_idx]));
+                                    ui.label(format!("  density: {:.3} ({}/{})", trait_density, non_zero_count, total_count));
+                                    if non_zero_count > 0 {
+                                        ui.label(format!("  (non-zero) min: {:.3}, max: {:.3}", min, max));
+                                    } else {
+                                        ui.label(format!("  (non-zero) min: , max: "));
+                                    }
+                                    ui.label(format!("  avg: {:.3}, avg (non-zero): {:.3}", avg, avg_non_zero));
+                                    ui.separator();
                                 }
-
-                                let values = self.grid.get_trait_slice(trait_idx);
-
-                                let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
-                                let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                                let avg = values.iter().sum::<f32>() / values.len() as f32;
-
-                                ui.label(format!("{}:", self.trait_names[trait_idx]));
-                                ui.label(format!("  min: {:.3}, max: {:.3}", min, max));
-                                ui.label(format!("  avg: {:.3}", avg));
-                                ui.separator();
-                            }
-                        });
+                            });
+                    }
                 });
             });
 

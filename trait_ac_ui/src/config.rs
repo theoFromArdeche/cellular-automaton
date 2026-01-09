@@ -90,10 +90,15 @@ pub struct Config {
     pub show_values: bool,
     pub show_values_minimum_cell_size: f32,
 
+    // Stats display
+    pub show_stats: bool,
+
     // Colors
     #[serde(deserialize_with = "deserialize_color_scheme")]
     pub color_scheme: ColorScheme,
     pub base_color_not_empty: f32,
+    pub base_color_not_empty_min: f32,
+    pub base_color_not_empty_max: f32,
 
     // Trait settings
     pub active_mask: Vec<u8>,
@@ -137,9 +142,12 @@ impl Default for Config {
 
             show_values: false,
             show_values_minimum_cell_size: 20.0,
+            show_stats: true,
 
             color_scheme: ColorScheme::Viridis,
             base_color_not_empty: 0.0,
+            base_color_not_empty_min: 0.0,
+            base_color_not_empty_max: 1.0,
 
             active_mask: vec![
                 1, 1, 0,
@@ -203,6 +211,21 @@ impl Config {
         }
         if self.cell_size < self.cell_size_min || self.cell_size > self.cell_size_max {
             return Err("cell_size is out of bounds");
+        }
+        if self.cell_size_min < 0.0 || self.cell_size_min > self.cell_size_max {
+            return Err("cell_size_min should be between 0.0 and cell_size_max");
+        }
+        if self.cell_size_max < self.cell_size_min {
+            return Err("cell_size_max should be greater than cell_size_min");
+        }
+        if self.base_color_not_empty < self.base_color_not_empty_min || self.base_color_not_empty > self.base_color_not_empty_max {
+            return Err("base_color_not_empty is out of bounds");
+        }
+        if self.base_color_not_empty_min < 0.0 || self.base_color_not_empty_min > 1.0 {
+            return Err("base_color_not_empty_min should be between 0.0 and 1.0");
+        }
+        if self.base_color_not_empty_max < 0.0 || self.base_color_not_empty_max > 1.0 {
+            return Err("base_color_not_empty_max should be between 0.0 and 1.0");
         }
         if self.active_mask.is_empty() {
             return Err("active_mask must not be empty");
