@@ -359,6 +359,7 @@ impl eframe::App for CAApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
+        let mut flag_update_texture = false;
 
         // Handle keyboard input
         ctx.input(|i| {
@@ -369,6 +370,7 @@ impl eframe::App for CAApp {
             // Delete key to reset
             if i.key_pressed(egui::Key::Delete) {
                 self.reset_grid();
+                flag_update_texture=true;
             }
         });
 
@@ -418,7 +420,6 @@ impl eframe::App for CAApp {
             
             ctx.request_repaint();
         }
-        let mut flag_update_texture = false;
         
         // Left panel: Controls
         egui::SidePanel::left("controls").min_width(300.0).show(ctx, |ui| {
@@ -436,11 +437,13 @@ impl eframe::App for CAApp {
                 }
                 if ui.button("🔄 Reset").clicked() {
                     self.reset_grid();
+                    flag_update_texture=true;
                 }
             });
             
             if ui.button("🎲 Randomize").clicked() {
                 self.randomize_grid();
+                flag_update_texture=true;
             }
             
             ui.add(egui::Slider::new(&mut self.steps_per_second, self.steps_per_second_min..=self.steps_per_second_max)
