@@ -383,34 +383,17 @@ impl RuleFunction {
         neighborhood_traits: &Neighborhood,
         grid: &Grid,
     ) -> f32 {
-        const TOLERANCE: f32 = 0.4;
+        const TOLERANCE: f32 = 0.5;
 
-        #[inline(always)]
-        fn to_group(value: f32) -> Option<i32> {
-            if value >= 0.75 {
-                Some(1)
-            } else if value <= 0.25 {
-                Some(-1)
-            } else {
-                None
-            }
-        }
+        let current_value = if grid.get_cell_trait(cell_r, cell_c, trait_index) >= 0.5 {
+            1.0
+        } else {
+            0.0
+        };
 
-        #[inline(always)]
-        fn from_group(group: Option<i32>) -> f32 {
-            match group {
-                Some(-1) => 0.0,
-                Some(1) => 1.0,
-                _ => 0.5,
-            }
-        }
-
-        let current_value = grid.get_cell_trait(cell_r, cell_c, trait_index);
-        let current_group = to_group(current_value);
-
-        let mut occupied_neighbors = 0usize;
-        let mut same_group = 0usize;
-        let mut group_counts = [0usize; 2]; // [sellers (-1), buyers (1)]
+        let mut same = 0usize;
+        let mut occupied = 0usize;
+        let mut counts = [0usize; 2];
 
         let center_row = neighborhood_traits.center_row;
         let center_col = neighborhood_traits.center_col;
@@ -427,54 +410,35 @@ impl RuleFunction {
                         continue;
                     }
 
-                    if let Some(group) = to_group(grid.get_cell_trait(grid_r, grid_c, trait_index)) {
-                        occupied_neighbors += 1;
-                        if group == -1 {
-                            group_counts[0] += 1;
-                        } else {
-                            group_counts[1] += 1;
-                        }
-                        if let Some(me) = current_group {
-                            if group == me {
-                                same_group += 1;
-                            }
-                        }
+                    let neighbor_value = if grid.get_cell_trait(grid_r, grid_c, trait_index) >= 0.5 {
+                        1
+                    } else {
+                        0
+                    };
+
+                    occupied += 1;
+                    counts[neighbor_value] += 1;
+
+                    if neighbor_value as f32 == current_value {
+                        same += 1;
                     }
                 }
             }
         }
 
-        if let Some(me) = current_group {
-            if occupied_neighbors == 0 {
-                return from_group(Some(me));
-            }
-            let similarity = same_group as f32 / occupied_neighbors as f32;
-            if similarity >= TOLERANCE {
-                from_group(Some(me))
-            } else {
-                from_group(None)
-            }
+        if occupied == 0 {
+            return current_value;
+        }
+
+        let similarity = same as f32 / occupied as f32;
+        if similarity >= TOLERANCE {
+            current_value
+        } else if counts[1] > counts[0] {
+            1.0
+        } else if counts[0] > counts[1] {
+            0.0
         } else {
-            if occupied_neighbors == 0 {
-                return from_group(None);
-            }
-
-            let mut best_group: Option<i32> = None;
-            let mut best_ratio = 0.0f32;
-
-            let candidates = [(-1, group_counts[0]), (1, group_counts[1])];
-            for (group, count) in candidates {
-                if count == 0 {
-                    continue;
-                }
-                let ratio = count as f32 / occupied_neighbors as f32;
-                if ratio >= TOLERANCE && ratio > best_ratio {
-                    best_ratio = ratio;
-                    best_group = Some(group);
-                }
-            }
-
-            from_group(best_group)
+            current_value
         }
     }
     pub fn panic_threshold(
