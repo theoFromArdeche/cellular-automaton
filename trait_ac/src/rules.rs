@@ -1,11 +1,24 @@
 use crate::neighborhood::Neighborhood;
 use crate::grid::Grid;
+use rand::Rng;
 
 
 
 pub struct RuleFunction;
 
 impl RuleFunction {
+    const TRADER_TYPE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    #[inline(always)]
+    fn is_cell_chartist(cell_r: usize, cell_c: usize) -> bool {
+        let mut x = ((cell_r as u64) << 32) | (cell_c as u64);
+        x ^= Self::TRADER_TYPE_SEED;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 33;
+        x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+        (x % 100) < 60
+    }
+
     /// No change - cells maintain their trait value
     #[inline(always)]
     pub fn static_rule(trait_index: usize, cell_r: usize, cell_c: usize, _neighborhood_traits: &Neighborhood, grid: &Grid) -> f32 {
@@ -301,20 +314,34 @@ impl RuleFunction {
         }
     }
 
-    pub fn local_majority(trait_index: usize, cell_r: usize, cell_c: usize, neighborhood_traits: &Neighborhood, grid: &Grid) -> f32 {
-        const NOISE_STRENGTH: f32 = 0.35;
-        let state_from_value = |value: f32| -> f32 {
-            if value > 0.5 {
+    pub fn local_majority(
+        trait_index: usize,
+        cell_r: usize,
+        cell_c: usize,
+        neighborhood_traits: &Neighborhood,
+        grid: &Grid,
+    ) -> f32 {
+        fn to_spin(value: f32) -> f32 {
+            if value >= 0.75 {
                 1.0
-            } else if value < -0.5 {
+            } else if value <= 0.25 {
                 -1.0
             } else {
                 0.0
             }
-        };
+        }
 
-        let mut influence_sum = 0.0;
-        let mut influence_count = 0;
+        fn from_spin(spin: f32) -> f32 {
+            match spin {
+                -1.0 => 0.0,
+                1.0 => 1.0,
+                _ => 0.5,
+            }
+        }
+
+        let mut rng = rand::thread_rng();
+        let mut sum = 0.0;
+        let mut has_neighbor = false;
 
         let center_row = neighborhood_traits.center_row;
         let center_col = neighborhood_traits.center_col;
@@ -327,43 +354,28 @@ impl RuleFunction {
                     let (grid_r, grid_c) =
                         neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
                     if !grid.is_cell_empty(grid_r, grid_c) {
+                        has_neighbor = true;
                         let neighbor_value = grid.get_cell_trait(grid_r, grid_c, trait_index);
-                        influence_sum += state_from_value(neighbor_value);
-                        influence_count += 1;
+                        let noise = rng.gen_range(-1..=1) as f32;
+                        sum += to_spin(neighbor_value) + noise;
                     }
                 }
             }
         }
 
-        let current_state = state_from_value(grid.get_cell_trait(cell_r, cell_c, trait_index));
-
-        if influence_count == 0 {
-            return current_state;
+        if !has_neighbor {
+            return from_spin(to_spin(grid.get_cell_trait(cell_r, cell_c, trait_index)));
         }
 
-        let mut seed = (trait_index as u32)
-            .wrapping_mul(0x9E3779B9)
-            ^ (cell_r as u32).wrapping_mul(0x85EBCA6B)
-            ^ (cell_c as u32).wrapping_mul(0xC2B2AE35);
-
-        seed ^= seed >> 16;
-        seed = seed.wrapping_mul(0x7FEB352D);
-        seed ^= seed >> 15;
-        seed = seed.wrapping_mul(0x846CA68B);
-        seed ^= seed >> 16;
-
-        let noise = (seed as f32) / (u32::MAX as f32) * 2.0 - 1.0;
-        let decision = influence_sum + noise * NOISE_STRENGTH;
-
-        if decision > 0.0 {
+        if sum > 3.0 {
             1.0
-        } else if decision < 0.0 {
-            -1.0
+        } else if sum < -3.0 {
+            0.0
         } else {
-            current_state
+            0.5
         }
     }
-    pub fn panic_threshold(
+        pub fn panic_threshold(
         trait_index: usize,
         cell_r: usize,
         cell_c: usize,
@@ -372,19 +384,27 @@ impl RuleFunction {
     ) -> f32 {
         const THETA: f32 = 0.55;
 
-        let to_state = |value: f32| -> f32 {
-            if value > 0.5 {
-                1.0
-            } else if value < -0.5 {
-                -1.0
+        fn to_spin(value: f32) -> i32 {
+            if value >= 0.75 {
+                1
+            } else if value <= 0.25 {
+                -1
             } else {
-                0.0
+                0
             }
-        };
+        }
+
+        fn from_spin(spin: i32) -> f32 {
+            match spin {
+                -1 => 0.0,
+                1 => 1.0,
+                _ => 0.5,
+            }
+        }
 
         let mut buyers = 0;
         let mut sellers = 0;
-        let mut total = 0;
+        let mut active = 0;
 
         let center_row = neighborhood_traits.center_row;
         let center_col = neighborhood_traits.center_col;
@@ -398,33 +418,37 @@ impl RuleFunction {
                         neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
 
                     if !grid.is_cell_empty(grid_r, grid_c) {
-                        let state = to_state(grid.get_cell_trait(grid_r, grid_c, trait_index));
-                        if state > 0.5 {
-                            buyers += 1;
-                        } else if state < -0.5 {
-                            sellers += 1;
+                        match to_spin(grid.get_cell_trait(grid_r, grid_c, trait_index)) {
+                            1 => {
+                                buyers += 1;
+                                active += 1;
+                            }
+                            -1 => {
+                                sellers += 1;
+                                active += 1;
+                            }
+                            _ => {}
                         }
-                        total += 1;
                     }
                 }
             }
         }
 
-        if total == 0 {
-            return to_state(grid.get_cell_trait(cell_r, cell_c, trait_index));
+        if active == 0 {
+            return from_spin(to_spin(grid.get_cell_trait(cell_r, cell_c, trait_index)));
         }
 
-        let seller_ratio = sellers as f32 / total as f32;
+        let seller_ratio = sellers as f32 / active as f32;
         if seller_ratio > THETA {
-            0.0
-        } else {
-            let buyer_ratio = buyers as f32 / total as f32;
-            if buyer_ratio > THETA {
-                1.0
-            } else {
-                0.5
-            }
+            return from_spin(-1);
         }
+
+        let buyer_ratio = buyers as f32 / active as f32;
+        if buyer_ratio > THETA {
+            return from_spin(1);
+        }
+
+        from_spin(0)
     }
 
     pub fn lux_marchesi(
@@ -434,13 +458,8 @@ impl RuleFunction {
         neighborhood_traits: &Neighborhood,
         grid: &Grid,
     ) -> f32 {
-        // 1. Determine Agent Type based on coordinates (Deterministic)
-        // Use a simple hash so a specific cell always acts as the same type of trader
-        let seed = (cell_r as u32).wrapping_mul(37).wrapping_add((cell_c as u32).wrapping_mul(17));
-        // let is_chartist = (seed % 100) < 50; // 50% Chartists, 50% Fundamentalists
-        
-        // You can tweak this ratio. More chartists = more bubbles. More fundamentalists = more stability.
-        let is_chartist = (seed % 100) < 60; 
+        // Deterministic agent type assignment based on coordinates.
+        let is_chartist = Self::is_cell_chartist(cell_r, cell_c);
 
         if is_chartist {
             // --- Chartist: Imitates neighbors (Trend Follower) ---
@@ -451,7 +470,8 @@ impl RuleFunction {
             // Fundamental Value is assumed to be 0.0 (neutral)
             // "Current Price" is estimated by the local neighborhood sentiment
             
-            let fundamental_value = 0.0;
+            let fundamental_value = 0.5;
+            let valuation_band = 0.05;
             let mut price_sentiment = 0.0;
             let mut count = 0;
 
@@ -472,16 +492,15 @@ impl RuleFunction {
                     }
                 }
             }
-
-            let local_price = if count > 0 { price_sentiment / count as f32 } else { 0.0 };
+            let local_price = if count > 0 { price_sentiment / count as f32 } else { 0.5 };
 
             // Logic: Buy Low (Price < Fundamental), Sell High (Price > Fundamental)
-            if local_price < fundamental_value {
-                1.0 // Buy (Undervalued)
-            } else if local_price > fundamental_value {
-                -1.0 // Sell (Overvalued)
+            if local_price < fundamental_value - valuation_band {
+                1.0 // Underpriced, buy
+            } else if local_price > fundamental_value + valuation_band {
+                0.0 // Overpriced, sell
             } else {
-                0.0 // Hold
+                0.5 // Fairly priced, hold
             }
         }
     }
