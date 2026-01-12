@@ -375,7 +375,109 @@ impl RuleFunction {
             0.5
         }
     }
-        pub fn panic_threshold(
+
+    pub fn schelling(
+        trait_index: usize,
+        cell_r: usize,
+        cell_c: usize,
+        neighborhood_traits: &Neighborhood,
+        grid: &Grid,
+    ) -> f32 {
+        const TOLERANCE: f32 = 0.4;
+
+        #[inline(always)]
+        fn to_group(value: f32) -> Option<i32> {
+            if value >= 0.75 {
+                Some(1)
+            } else if value <= 0.25 {
+                Some(-1)
+            } else {
+                None
+            }
+        }
+
+        #[inline(always)]
+        fn from_group(group: Option<i32>) -> f32 {
+            match group {
+                Some(-1) => 0.0,
+                Some(1) => 1.0,
+                _ => 0.5,
+            }
+        }
+
+        let current_value = grid.get_cell_trait(cell_r, cell_c, trait_index);
+        let current_group = to_group(current_value);
+
+        let mut occupied_neighbors = 0usize;
+        let mut same_group = 0usize;
+        let mut group_counts = [0usize; 2]; // [sellers (-1), buyers (1)]
+
+        let center_row = neighborhood_traits.center_row;
+        let center_col = neighborhood_traits.center_col;
+
+        for mask_r in 0..neighborhood_traits.height {
+            for mask_c in 0..neighborhood_traits.width {
+                if neighborhood_traits.is_valid(mask_r, mask_c) == 1
+                    && !(mask_r == center_row && mask_c == center_col)
+                {
+                    let (grid_r, grid_c) =
+                        neighborhood_traits.get_grid_coords(mask_r, mask_c, cell_r, cell_c, grid);
+
+                    if grid.is_cell_empty(grid_r, grid_c) {
+                        continue;
+                    }
+
+                    if let Some(group) = to_group(grid.get_cell_trait(grid_r, grid_c, trait_index)) {
+                        occupied_neighbors += 1;
+                        if group == -1 {
+                            group_counts[0] += 1;
+                        } else {
+                            group_counts[1] += 1;
+                        }
+                        if let Some(me) = current_group {
+                            if group == me {
+                                same_group += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(me) = current_group {
+            if occupied_neighbors == 0 {
+                return from_group(Some(me));
+            }
+            let similarity = same_group as f32 / occupied_neighbors as f32;
+            if similarity >= TOLERANCE {
+                from_group(Some(me))
+            } else {
+                from_group(None)
+            }
+        } else {
+            if occupied_neighbors == 0 {
+                return from_group(None);
+            }
+
+            let mut best_group: Option<i32> = None;
+            let mut best_ratio = 0.0f32;
+
+            let candidates = [(-1, group_counts[0]), (1, group_counts[1])];
+            for (group, count) in candidates {
+                if count == 0 {
+                    continue;
+                }
+                let ratio = count as f32 / occupied_neighbors as f32;
+                if ratio >= TOLERANCE && ratio > best_ratio {
+                    best_ratio = ratio;
+                    best_group = Some(group);
+                }
+            }
+
+            from_group(best_group)
+        }
+    }
+    pub fn panic_threshold(
         trait_index: usize,
         cell_r: usize,
         cell_c: usize,
@@ -891,6 +993,7 @@ define_rules!(
     (Charge, "charge", RuleFunction::charge_update),
     (Phase, "phase", RuleFunction::phase_update),
     (LocalMajority,   "local majority",   RuleFunction::local_majority),
+    (Schelling,       "schelling",        RuleFunction::schelling),
     (PanicThreshold,  "panic threshold",  RuleFunction::panic_threshold),
     (LuxMarchesi,     "lux marchesi",     RuleFunction::lux_marchesi),
     // Add new rules here:
