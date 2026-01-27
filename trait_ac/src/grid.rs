@@ -1,5 +1,4 @@
 use rand::Rng;
-use bitvec::prelude::*;
 
 
 /// Represents a 2D grid of cells (row-major, flat)
@@ -10,7 +9,7 @@ pub struct Grid {
     pub num_traits: usize,
     /// Single contiguous allocation: [trait0..., trait1..., ..., trait8...]
     pub data: Vec<f32>,
-    pub is_empty: BitVec<u64, Lsb0>,
+    pub is_empty: Vec<bool>,
 }
 
 impl Grid {
@@ -33,11 +32,11 @@ impl Grid {
         
         // Single allocation for all traits
         let mut data = vec![0.0; num_cells * num_traits];
-        let mut is_empty = bitvec![u64, Lsb0; 1; num_cells]; // Start all empty
+        let mut is_empty = vec![true; num_cells]; // Start all empty
         
         for idx in 0..num_cells {
             if rng.gen_range(0.0..=1.0) < fill_percentage {
-                is_empty.set(idx, false); // Mark as filled
+                is_empty[idx] = false; // Mark as filled
                 
                 for t in 0..num_traits {
                     let (min, max) = trait_ranges[t];
@@ -59,13 +58,13 @@ impl Grid {
     #[inline(always)]
     pub fn get_trait_slice(&self, trait_idx: usize) -> &[f32] {
         let start = trait_idx * self.num_cells;
-        &self.data[start..start + self.num_cells]
+        unsafe { self.data.get_unchecked(start..start + self.num_cells) }
     }
-    
+
     #[inline(always)]
     pub fn get_trait_slice_mut(&mut self, trait_idx: usize) -> &mut [f32] {
         let start = trait_idx * self.num_cells;
-        &mut self.data[start..start + self.num_cells]
+        unsafe { self.data.get_unchecked_mut(start..start + self.num_cells) }
     }
 
 
@@ -122,7 +121,7 @@ impl Grid {
     }
 
     pub fn count_filled_cells(&self) -> usize {
-        self.is_empty.count_zeros()
+        self.is_empty.iter().filter(|&&empty| !empty).count()
     }
 
     pub fn get_fill_percentage(&self) -> f32 {

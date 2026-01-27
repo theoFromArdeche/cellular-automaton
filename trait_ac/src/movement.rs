@@ -662,26 +662,12 @@ impl MovementRegistry {
         }
 
         // --- Phase 4: Construct next grid ---
-        let raw = next_grid.is_empty.as_raw_mut_slice();
-        let total_len = self.reserved.len();
-        
-        raw.par_iter_mut()
-            .enumerate()
-            .for_each(|(word_idx, word)| {
-                let mut bits: u64 = 0;
-                let base_idx = word_idx * 64;
-                let end = (base_idx + 64).min(total_len);
-                
-                for idx in base_idx..end {
-                    // BitVec with Lsb0: bit 0 is least significant
-                    let bit = idx - base_idx;
-                    if self.reserved[idx].is_none() {
-                        bits |= 1 << bit;
-                    }
-                }
-                *word = bits;
+        next_grid.is_empty
+            .par_iter_mut()
+            .zip(self.reserved.par_iter())
+            .for_each(|(empty, reserved)| {
+                *empty = reserved.is_none();
             });
-        
 
         let width = grid.width;
 

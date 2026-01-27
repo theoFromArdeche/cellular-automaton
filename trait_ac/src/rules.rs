@@ -97,10 +97,11 @@ impl RuleFunction {
         let w = grid.width;
         let h = grid.height;
         
-        let r_prev = cell_r.wrapping_sub(1) % h;
-        let r_next = (cell_r + 1) % h;
-        let c_prev = cell_c.wrapping_sub(1) % w;
-        let c_next = (cell_c + 1) % w;
+        // Branchless wrap - avoids expensive modulo
+        let r_prev = if cell_r == 0 { h - 1 } else { cell_r - 1 };
+        let r_next = if cell_r == h - 1 { 0 } else { cell_r + 1 };
+        let c_prev = if cell_c == 0 { w - 1 } else { cell_c - 1 };
+        let c_next = if cell_c == w - 1 { 0 } else { cell_c + 1 };
         
         let row_prev = r_prev * w;
         let row_curr = cell_r * w;
@@ -109,27 +110,24 @@ impl RuleFunction {
         let t = grid.get_trait_slice(trait_index);
         
         unsafe {
-            // Count alive: cast (value > 0.5) directly to u8
+            let t = t.as_ptr();
+            
             let alive = 
-                (*t.get_unchecked(row_prev + c_prev) > 0.5) as u8 +
-                (*t.get_unchecked(row_prev + cell_c) > 0.5) as u8 +
-                (*t.get_unchecked(row_prev + c_next) > 0.5) as u8 +
-                (*t.get_unchecked(row_curr + c_prev) > 0.5) as u8 +
-                (*t.get_unchecked(row_curr + c_next) > 0.5) as u8 +
-                (*t.get_unchecked(row_next + c_prev) > 0.5) as u8 +
-                (*t.get_unchecked(row_next + cell_c) > 0.5) as u8 +
-                (*t.get_unchecked(row_next + c_next) > 0.5) as u8;
+                (*t.add(row_prev + c_prev) > 0.5) as u8 +
+                (*t.add(row_prev + cell_c) > 0.5) as u8 +
+                (*t.add(row_prev + c_next) > 0.5) as u8 +
+                (*t.add(row_curr + c_prev) > 0.5) as u8 +
+                (*t.add(row_curr + c_next) > 0.5) as u8 +
+                (*t.add(row_next + c_prev) > 0.5) as u8 +
+                (*t.add(row_next + cell_c) > 0.5) as u8 +
+                (*t.add(row_next + c_next) > 0.5) as u8;
             
-            let is_alive = *t.get_unchecked(row_curr + cell_c) > 0.5;
+            let is_alive = *t.add(row_curr + cell_c) > 0.5;
             
-            // Combined branchless lookup: alive + 9 * is_alive indexes into single array
             const RESULT: [f32; 18] = [
-                // Dead cell (indices 0-8)
                 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                // Alive cell (indices 9-17)
                 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ];
-            
             *RESULT.get_unchecked(alive as usize + 9 * is_alive as usize)
         }
     }

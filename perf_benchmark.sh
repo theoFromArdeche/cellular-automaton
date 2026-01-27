@@ -43,6 +43,11 @@ cargo build --release
 cd ../trait_ac
 cargo build --release
 
+cd ../../perf-improve-7/trait_ac_ui
+cargo build --release
+cd ../trait_ac
+cargo build --release
+
 echo "==================== FINISHED BUILDING ===================="
 
 ###############################################################################
@@ -81,6 +86,7 @@ run_benchmark() {
     run_benchmark 4 "trait_ac" "Perf improve 4"
     run_benchmark 5 "trait_ac" "Perf improve 5"
     run_benchmark 6 "trait_ac" "Perf improve 6"
+    run_benchmark 7 "trait_ac" "Perf improve 7"
     
     echo ""
     echo "==================== trait_ac_ui (graphical interface) ===================="
@@ -92,6 +98,7 @@ run_benchmark() {
     run_benchmark 4 "trait_ac_ui" "Perf improve 4"
     run_benchmark 5 "trait_ac_ui" "Perf improve 5"
     run_benchmark 6 "trait_ac_ui" "Perf improve 6"
+    run_benchmark 7 "trait_ac_ui" "Perf improve 7"
     
     echo ""
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Benchmark suite completed"
