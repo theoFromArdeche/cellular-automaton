@@ -1,0 +1,14 @@
+Version: 5
+Path: perf-improve-5
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: de2a57fa29ccf608e63f562f9a0cdb4cd0ece992
+Short:  de2a57f
+Author: theo <theodeygas@gmail.com>
+Date:   2025-12-26 22:28:27 +0100
+Msg:    gpu rendering
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac_ui/src/main.rs | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)

@@ -1,0 +1,130 @@
+# Git diff for Version 6
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: d5b73d0
+
+diff --git a/trait_ac_ui/config.toml b/trait_ac_ui/config.toml
+index 1792849..e2f3af4 100644
+--- a/trait_ac_ui/config.toml
++++ b/trait_ac_ui/config.toml
+@@ -1,21 +1,21 @@
+ # Grid settings
+-grid_width = 500
+-grid_height = 500
+-grid_density = 0.5
+-num_traits = 9
++grid_width = 3000
++grid_height = 3000
++grid_density = 1.0
++num_traits = 1
+ 
+ 
+ # Simulation timing
+-steps_per_second = 1000.0
+-timed_simulation = false
++steps_per_second = 10000.0
++timed_simulation = true
+ timestep_max = 100
+ 
+ 
+ # Grid bounds
+ grid_width_min = 3
+-grid_width_max = 5000
++grid_width_max = 10000
+ grid_height_min = 3
+-grid_height_max = 5000
++grid_height_max = 10000
+ 
+ 
+ # Steps per second bounds
+@@ -24,7 +24,7 @@ steps_per_second_max = 10000.0
+ 
+ 
+ # Cell display
+-cell_size = 1.0
++cell_size = 0.397
+ cell_size_min = 0.1
+ cell_size_max = 100.0
+ 
+@@ -40,7 +40,7 @@ base_color_no_actor = 0.0
+ 
+ 
+ # Trait settings
+-active_mask = [1, 1, 0, 0, 0, 0, 0, 0, 0]
++active_mask = [1, 0, 0, 0, 0, 0, 0, 0, 0]
+ initial_selected_trait = 0
+ 
+ initialisation_ranges = [
+@@ -52,12 +52,12 @@ initialisation_ranges = [
+ 
+ # Rules & movement
+ rules = [
+-    "social energy", "social influence", "conway optimized",
++    "conway optimized", "conway optimized", "conway optimized",
+     "conway optimized", "conway optimized", "conway optimized",
+     "conway optimized", "conway optimized", "conway optimized",
+ ]
+ 
+-movement = "social movement"
++movement = "static"
+ 
+ 
+ # Neighborhood masks
+diff --git a/trait_ac_ui/src/main.rs b/trait_ac_ui/src/main.rs
+index e033b51..5574e51 100644
+--- a/trait_ac_ui/src/main.rs
++++ b/trait_ac_ui/src/main.rs
+@@ -41,6 +41,7 @@ struct CAApp {
+     next_grid: Grid,
+     
+     // Simulation state
++    initialized: bool,
+     timestep: usize,
+     timed_simulation: bool,
+     timestep_max: usize,
+@@ -169,10 +170,11 @@ impl CAApp {
+             initialisation_ranges: config.initialisation_ranges,
+             next_grid,
+ 
++            initialized: false,
+             timestep: 0,
+             timed_simulation: config.timed_simulation,
+             timestep_max: config.timestep_max,
+-            start: Instant::now(),
++            start: Instant::now(), // placeholder, it will be initialized in step_simulation at timestep 0
+             is_playing: config.timed_simulation,
+             steps_per_second: config.steps_per_second,
+             time_accumulator: 0.0,
+@@ -362,13 +364,16 @@ impl eframe::App for CAApp {
+             }
+         });
+ 
+-        // Handle animation
+-        if self.is_playing {
++        if !self.initialized {
++            self.initialized = true;
++            ctx.request_repaint();
++        } else if self.is_playing {  // Handle animation
+             self.time_accumulator += ctx.input(|i| i.stable_dt);
+             let step_duration = 1.0 / self.steps_per_second;
+             
+-            let frame_time = ctx.input(|i| i.stable_dt);
++            
+             let target_frame_time = 1.0 / 60.0;
++            let frame_time = ctx.input(|i| i.stable_dt);
+             
+             // Calculate remaining time budget based on actual frame time
+             // If last frame was slow, we have less budget this frame
+@@ -376,7 +381,11 @@ impl eframe::App for CAApp {
+             let simulation_budget = (target_frame_time - render_time_estimate).max(0.001);
+             
+             let estimated_step_time = self.avg_step_time.unwrap_or(0.0001);
+-            let max_steps = ((simulation_budget / estimated_step_time) as usize).max(1);
++            let max_steps = if self.timestep == 0 {
++                1
++            } else {
++                ((simulation_budget / estimated_step_time) as usize).max(1)
++            };
+             
+             let mut steps_taken = 0;
+             let step_start = std::time::Instant::now();

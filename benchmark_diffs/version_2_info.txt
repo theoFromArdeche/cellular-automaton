@@ -1,0 +1,15 @@
+Version: 2
+Path: perf-improve-2
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: 6002d098279238fb67a70e3e0bcef592aa4353f8
+Short:  6002d09
+Author: theo <theodeygas@gmail.com>
+Date:   2025-12-23 19:46:15 +0100
+Msg:    performance boost + refactor
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac/src/main.rs    | 10 +++---
+ trait_ac_ui/src/main.rs | 81 ++++++++++++++++++++++++++++++++++++++++---------
+ 2 files changed, 71 insertions(+), 20 deletions(-)

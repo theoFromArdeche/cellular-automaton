@@ -1,0 +1,72 @@
+# Git diff for Version 5
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: de2a57f
+
+diff --git a/trait_ac_ui/src/main.rs b/trait_ac_ui/src/main.rs
+index dbd96af..53b1a53 100644
+--- a/trait_ac_ui/src/main.rs
++++ b/trait_ac_ui/src/main.rs
+@@ -276,6 +276,7 @@ struct CAApp {
+     next_grid: Grid,
+     
+     // Simulation state
++    initialized: bool,
+     timestep: usize,
+     timed_simulation: bool,
+     timestep_max: usize,
+@@ -332,10 +333,10 @@ impl CAApp {
+         // Configuration
+         let grid_width = 3000;
+         let grid_height = 3000;
+-        let steps_per_second = 100.0;
++        let steps_per_second = 10000.0;
+         let grid_density = 1.0;
+ 
+-        let timed_simulation = false;
++        let timed_simulation = true;
+         let timestep_max = 100;
+ 
+         let grid_width_min = 3;
+@@ -345,9 +346,9 @@ impl CAApp {
+         let grid_height_max = 5000;
+ 
+         let steps_per_second_min = 1.0;
+-        let steps_per_second_max = 500.0;
++        let steps_per_second_max = 10000.0;
+ 
+-        let cell_size = 0.5;
++        let cell_size = 0.397;
+         let cell_size_min = 0.1;
+         let cell_size_max = 100.0;
+ 
+@@ -439,6 +440,7 @@ impl CAApp {
+             grid_density,
+             next_grid,
+ 
++            initialized: false,
+             timestep: 0,
+             timed_simulation,
+             timestep_max,
+@@ -669,8 +671,10 @@ impl eframe::App for CAApp {
+             }
+         });
+ 
+-        // Handle animation
+-        if self.is_playing {
++        if !self.initialized {
++            self.initialized = true;
++            ctx.request_repaint();
++        } else if self.is_playing {
+             self.time_accumulator += ctx.input(|i| i.stable_dt);
+             let step_duration = 1.0 / self.steps_per_second;
+             
+@@ -679,7 +683,7 @@ impl eframe::App for CAApp {
+             let target_frame_time = 1.0 / 60.0; // Target 60 FPS
+             
+             // Calculate how many steps we can afford this frame
+-            let max_steps = if frame_time > target_frame_time * 1.5 {
++            let max_steps = if self.timestep == 0 || frame_time > target_frame_time * 1.5 {
+                 1 // If we're lagging, only do 1 step per frame
+             } else {
+                 10 // Otherwise allow up to 10 steps per frame

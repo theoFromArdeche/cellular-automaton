@@ -121,10 +121,10 @@ impl Default for Config {
         Self {
             grid_width: 500,
             grid_height: 500,
-            grid_density: 0.5,
-            num_traits: 9,
+            grid_density: 1.0,
+            num_traits: 3,
 
-            steps_per_second: 1000.0,
+            steps_per_second: 25.0,
             timed_simulation: false,
             timestep_max: 100,
 
@@ -150,7 +150,7 @@ impl Default for Config {
             base_color_not_empty_max: 1.0,
 
             active_mask: vec![
-                1, 1, 0,
+                1, 1, 1,
                 0, 0, 0,
                 0, 0, 0,
             ],
@@ -163,11 +163,11 @@ impl Default for Config {
             ],
 
             rules: vec![
-                Rule::SocialEnergy, Rule::SocialInfluence, Rule::ConwayOptimized,
+                Rule::Energy,          Rule::Charge,          Rule::Phase,
                 Rule::ConwayOptimized, Rule::ConwayOptimized, Rule::ConwayOptimized,
                 Rule::ConwayOptimized, Rule::ConwayOptimized, Rule::ConwayOptimized,
             ],
-            movement: Movement::Social,
+            movement: Movement::EnergyChargePhase,
 
             neighborhood_traits_mask: vec![
                 vec![1, 1, 1],

@@ -63,7 +63,7 @@ rules = [
     "conway optimized", "conway optimized", "conway optimized",
 ]
 
-movement = "custom2"
+movement = "energy charge phase"
 
 
 # Neighborhood masks

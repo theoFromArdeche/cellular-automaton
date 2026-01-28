@@ -1,0 +1,185 @@
+# Git diff for Version 2
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: 6002d09
+
+diff --git a/trait_ac/src/main.rs b/trait_ac/src/main.rs
+index 3a788cf..36d3ec8 100644
+--- a/trait_ac/src/main.rs
++++ b/trait_ac/src/main.rs
+@@ -9,16 +9,15 @@ use rayon::prelude::*;
+ 
+ 
+ fn main() {
+-    let start = Instant::now();
+     println!("=== Modular Cellular Automata Simulation ===\n");
+ 
+     // Configuration
+-    let grid_height = 500;
+-    let grid_width = 500;
++    let grid_height = 3000;
++    let grid_width = 3000;
+     let grid_density = 1.0;
+-    let timesteps = 200;
++    let timesteps = 100;
+ 
+-    let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
++    let active_traits: Vec<usize> = vec![0];
+ 
+     // Neighborhood mask
+     let neighborhood_traits_mask = vec![
+@@ -84,6 +83,7 @@ fn main() {
+     print_active_traits(&active_traits, &trait_names, &rules_registry);
+ 
+     // Simulation loop with optimizations
++    let start = Instant::now();
+     for _t in 1..=timesteps {
+         // Step 1: Update all active traits using parallel processing
+         let mut new_cells: Vec<Vec<_>> = (0..grid.height)
+diff --git a/trait_ac_ui/src/main.rs b/trait_ac_ui/src/main.rs
+index 06ca16c..5cbfa15 100644
+--- a/trait_ac_ui/src/main.rs
++++ b/trait_ac_ui/src/main.rs
+@@ -4,9 +4,9 @@ use trait_ac::grid::Grid;
+ use trait_ac::neighborhood::{Neighborhood, NeighborhoodSettings};
+ use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
+ use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
+-use trait_ac::utils::{semantic_traits_names};
+ use rayon::prelude::*;
+-
++use std::time::Instant;
++use trait_ac::utils::{semantic_traits_names, print_separator, print_active_traits};
+ 
+ 
+ fn main() -> eframe::Result<()> {
+@@ -95,7 +95,10 @@ struct CAApp {
+     grid_density: f32,
+     
+     // Simulation state
++    initialized: bool,
+     timestep: usize,
++    timestep_max: usize,
++    start: Instant,
+     is_playing: bool,
+     steps_per_second: f32,
+     time_accumulator: f32,
+@@ -132,22 +135,22 @@ struct CAApp {
+ impl Default for CAApp {
+     fn default() -> Self {
+         // Configuration
+-        let grid_width = 500;
+-        let grid_height = 500;
+-        let steps_per_second = 25.0;
++        let grid_width = 3000;
++        let grid_height = 3000;
++        let steps_per_second = 10000.0;
+         let grid_density = 1.0;
+ 
+ 
+         let grid_width_min = 3;
+-        let grid_width_max = 1000;
++        let grid_width_max = 5000;
+ 
+         let grid_height_min = 3;
+-        let grid_height_max = 1000;
++        let grid_height_max = 5000;
+ 
+         let steps_per_second_min = 1.0;
+-        let steps_per_second_max = 200.0;
++        let steps_per_second_max = 10000.0;
+ 
+-        let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
++        let active_traits: Vec<usize> = vec![0];
+         let initial_selected_trait = active_traits[0];
+ 
+         // Neighborhood mask
+@@ -215,8 +218,11 @@ impl Default for CAApp {
+             grid_height,
+             grid_density,
+ 
++            initialized: false,
+             timestep: 0,
+-            is_playing: false,
++            timestep_max: 100,
++            start: Instant::now(),
++            is_playing: true,
+             steps_per_second,
+             time_accumulator: 0.0,
+             grid_texture: None,
+@@ -236,11 +242,11 @@ impl Default for CAApp {
+             steps_per_second_max,
+             
+             selected_trait: initial_selected_trait,
+-            cell_size: 3.0,
++            cell_size: 0.397,
+             show_values: false,
+             color_scheme: ColorScheme::Viridis,
+             base_color_no_actor: 0.1,
+-            min_cell_size: 1.0,
++            min_cell_size: 0.01,
+             max_cell_size: 100.0,
+ 
+             trait_names,
+@@ -346,14 +352,59 @@ impl CAApp {
+ 
+ impl eframe::App for CAApp {
+     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+-        // Handle animation
+-        if self.is_playing {
++        if self.timestep >= self.timestep_max {
++            println!("Simulation completed at timestep {}. Closing app.", self.timestep);
++            print_separator();
++            self.timestep_max = 200; // to avoid printing multiple times
++
++            println!("Configuration:");
++            println!("  Grid: {}x{}", self.grid_width, self.grid_height);
++            println!("  Timesteps: {}", self.timestep);
++
++            print_active_traits(&self.active_traits, &self.trait_names, &self.rules_registry);
++            
++            let elapsed = self.start.elapsed();
++            println!("\nExecution time: {:?}", elapsed);
++            println!(
++                "Performance: {:.2} timesteps/sec",
++                self.timestep as f64 / elapsed.as_secs_f64()
++            );
++            println!(
++                "Cells/sec: {:.2}M",
++                (self.grid_width * self.grid_height * self.timestep) as f64 / elapsed.as_secs_f64() / 1_000_000.0
++            );
++            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
++            return;
++        }
++
++        if !self.initialized {
++            self.initialized = true;
++            ctx.request_repaint();
++        } else if self.is_playing {  // Handle animation
+             self.time_accumulator += ctx.input(|i| i.stable_dt);
+             let step_duration = 1.0 / self.steps_per_second;
+             
+-            while self.time_accumulator >= step_duration {
++            // Adaptive step limiting based on frame time
++            let frame_time = ctx.input(|i| i.stable_dt);
++            let target_frame_time = 1.0 / 60.0; // Target 60 FPS
++            
++            // Calculate how many steps we can afford this frame
++            let max_steps = if self.timestep == 0 || frame_time > target_frame_time * 1.5 {
++                1 // If we're lagging, only do 1 step per frame
++            } else {
++                10 // Otherwise allow up to 10 steps per frame
++            };
++            
++            let mut steps_taken = 0;
++            while self.time_accumulator >= step_duration && steps_taken < max_steps {
+                 self.step_simulation();
+                 self.time_accumulator -= step_duration;
++                steps_taken += 1;
++            }
++            
++            // Drop excess time if we can't keep up
++            if self.time_accumulator > step_duration * 2.0 {
++                self.time_accumulator = 0.0;
+             }
+             
+             ctx.request_repaint();

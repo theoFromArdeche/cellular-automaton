@@ -1,0 +1,93 @@
+# Git diff for Version 7
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: 95c8875
+
+diff --git a/trait_ac_ui/config.toml b/trait_ac_ui/config.toml
+index 0bb619a..75ad315 100644
+--- a/trait_ac_ui/config.toml
++++ b/trait_ac_ui/config.toml
+@@ -1,21 +1,21 @@
+ # Grid settings
+-grid_width = 500
+-grid_height = 500
++grid_width = 3000
++grid_height = 3000
+ grid_density = 1.0
+-num_traits = 3
++num_traits = 1
+ 
+ 
+ # Simulation timing
+-steps_per_second = 25.0
+-timed_simulation = false
++steps_per_second = 10000.0
++timed_simulation = true
+ timestep_max = 100
+ 
+ 
+ # Grid bounds
+ grid_width_min = 3
+-grid_width_max = 7500
++grid_width_max = 10000
+ grid_height_min = 3
+-grid_height_max = 7500
++grid_height_max = 10000
+ 
+ 
+ # Steps per second bounds
+@@ -24,7 +24,7 @@ steps_per_second_max = 10000.0
+ 
+ 
+ # Cell display
+-cell_size = 0.5
++cell_size = 0.397
+ cell_size_min = 0.1
+ cell_size_max = 100.0
+ 
+@@ -46,7 +46,7 @@ base_color_not_empty_max = 1.0
+ 
+ 
+ # Trait settings
+-active_mask = [1, 1, 1, 0, 0, 0, 0, 0, 0]
++active_mask = [1, 0, 0, 0, 0, 0, 0, 0, 0]
+ initial_selected_trait = 0
+ 
+ initialisation_ranges = [
+@@ -58,27 +58,23 @@ initialisation_ranges = [
+ 
+ # Rules & movement
+ rules = [
+-    "energy", "charge", "phase",
++    "conway optimized", "conway optimized", "conway optimized",
+     "conway optimized", "conway optimized", "conway optimized",
+     "conway optimized", "conway optimized", "conway optimized",
+ ]
+ 
+-movement = "custom2"
++movement = "static"
+ 
+ 
+ # Neighborhood masks
+ neighborhood_traits_mask = [
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
++    [1, 1, 1],
++    [1, 1, 1],
++    [1, 1, 1],
+ ]
+ 
+ neighborhood_mvt_mask = [
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
+-    [1, 1, 1, 1, 1],
++    [1, 1, 1],
++    [1, 1, 1],
++    [1, 1, 1],
+ ]
+\ No newline at end of file

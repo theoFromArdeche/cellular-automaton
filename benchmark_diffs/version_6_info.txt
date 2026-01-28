@@ -1,0 +1,15 @@
+Version: 6
+Path: perf-improve-6
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: d5b73d08ec0926cdac30b0a783dc5fb3337bd583
+Short:  d5b73d0
+Author: theo <theodeygas@gmail.com>
+Date:   2026-01-07 18:41:52 +0100
+Msg:    refactor, cleanup, fixed small bugs, added config files
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac_ui/config.toml | 24 ++++++++++++------------
+ trait_ac_ui/src/main.rs | 19 ++++++++++++++-----
+ 2 files changed, 26 insertions(+), 17 deletions(-)

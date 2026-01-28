@@ -1,0 +1,15 @@
+Version: 3
+Path: perf-improve-3
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: 4e7ee8c4ba1e3303f56a0ccdd5cabadb7a02ec53
+Short:  4e7ee8c
+Author: theo <theodeygas@gmail.com>
+Date:   2025-12-24 16:54:18 +0100
+Msg:    perf boost (less allocation + new approach)
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac/src/main.rs    |  8 +++----
+ trait_ac_ui/src/main.rs | 62 ++++++++++++++++++++++++++++++++++++++-----------
+ 2 files changed, 52 insertions(+), 18 deletions(-)

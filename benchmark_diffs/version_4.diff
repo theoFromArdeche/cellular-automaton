@@ -1,0 +1,74 @@
+# Git diff for Version 4
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: c1d129c
+
+diff --git a/trait_ac_ui/src/main.rs b/trait_ac_ui/src/main.rs
+index c4592aa..b68f2b5 100644
+--- a/trait_ac_ui/src/main.rs
++++ b/trait_ac_ui/src/main.rs
+@@ -97,6 +97,7 @@ struct CAApp {
+     next_grid: Grid,
+     
+     // Simulation state
++    initialized: bool,
+     timestep: usize,
+     timed_simulation: bool,
+     timestep_max: usize,
+@@ -142,10 +143,10 @@ impl Default for CAApp {
+         // Configuration
+         let grid_width = 3000;
+         let grid_height = 3000;
+-        let steps_per_second = 25.0;
++        let steps_per_second = 10000.0;
+         let grid_density = 1.0;
+ 
+-        let timed_simulation = false;
++        let timed_simulation = true;
+         let timestep_max = 100;
+ 
+         let grid_width_min = 3;
+@@ -155,10 +156,10 @@ impl Default for CAApp {
+         let grid_height_max = 5000;
+ 
+         let steps_per_second_min = 1.0;
+-        let steps_per_second_max = 500.0;
++        let steps_per_second_max = 10000.0;
+ 
+-        let cell_size = 0.5;
+-        let cell_size_min = 0.1;
++        let cell_size = 0.397;
++        let cell_size_min = 0.01;
+         let cell_size_max = 100.0;
+ 
+         let show_values = false;
+@@ -249,6 +250,7 @@ impl Default for CAApp {
+             grid_density,
+             next_grid,
+ 
++            initialized: false,
+             timestep: 0,
+             timed_simulation,
+             timestep_max,
+@@ -487,8 +489,10 @@ impl eframe::App for CAApp {
+             }
+         });
+ 
+-        // Handle animation
+-        if self.is_playing {
++        if !self.initialized {
++            self.initialized = true;
++            ctx.request_repaint();
++        } else if self.is_playing {  // Handle animation
+             self.time_accumulator += ctx.input(|i| i.stable_dt);
+             let step_duration = 1.0 / self.steps_per_second;
+             
+@@ -497,7 +501,7 @@ impl eframe::App for CAApp {
+             let target_frame_time = 1.0 / 60.0; // Target 60 FPS
+             
+             // Calculate how many steps we can afford this frame
+-            let max_steps = if frame_time > target_frame_time * 1.5 {
++            let max_steps = if self.timestep == 0 || frame_time > target_frame_time * 1.5 {
+                 1 // If we're lagging, only do 1 step per frame
+             } else {
+                 10 // Otherwise allow up to 10 steps per frame

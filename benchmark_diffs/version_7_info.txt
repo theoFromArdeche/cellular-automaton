@@ -1,0 +1,14 @@
+Version: 7
+Path: perf-improve-7
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: 95c8875e8910cc97cfd6448f5fbe387f7f84858f
+Short:  95c8875
+Author: theo <theodeygas@gmail.com>
+Date:   2026-01-27 23:11:42 +0100
+Msg:    removed bitvec, updated conway_optimized, updated benchmarks
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac_ui/config.toml | 38 +++++++++++++++++---------------------
+ 1 file changed, 17 insertions(+), 21 deletions(-)

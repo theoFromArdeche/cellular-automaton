@@ -1,0 +1,14 @@
+Version: 4
+Path: perf-improve-4
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: c1d129c3fc3e34c80357368299aae5e6d6a85777
+Short:  c1d129c
+Author: theo <theodeygas@gmail.com>
+Date:   2025-12-25 20:25:03 +0100
+Msg:    refactor + better perf
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac_ui/src/main.rs | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)

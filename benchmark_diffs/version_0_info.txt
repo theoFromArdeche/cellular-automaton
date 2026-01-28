@@ -1,0 +1,16 @@
+Version: 0
+Path: perf-improve-0
+Generated: 2026-01-28 11:02:55
+
+==================== CURRENT COMMIT (HEAD) ====================
+Commit: d3c5067cfac9d4a82f2ff801d97d6a6ea58ac2ca
+Short:  d3c5067
+Author: theo <theodeygas@gmail.com>
+Date:   2025-12-19 09:27:47 +0100
+Msg:    update readme.md
+
+==================== UNSTAGED CHANGES ====================
+ trait_ac/src/main.rs    | 77 ++++++++++++++++++++++----------------
+ trait_ac/src/utils.rs   |  5 ++-
+ trait_ac_ui/src/main.rs | 99 +++++++++++++++++++++++++++++++++++++------------
+ 3 files changed, 124 insertions(+), 57 deletions(-)

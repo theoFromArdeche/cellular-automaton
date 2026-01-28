@@ -1,0 +1,164 @@
+# Git diff for Version 3
+# Unstaged changes compared to HEAD
+# Generated: 2026-01-28 11:02:55
+# HEAD Commit: 4e7ee8c
+
+diff --git a/trait_ac/src/main.rs b/trait_ac/src/main.rs
+index 5c9ffe8..d75c696 100644
+--- a/trait_ac/src/main.rs
++++ b/trait_ac/src/main.rs
+@@ -9,16 +9,15 @@ use rayon::prelude::*;
+ 
+ 
+ fn main() {
+-    let start = Instant::now();
+     println!("=== Modular Cellular Automata Simulation ===\n");
+ 
+     // Configuration
+-    let grid_height = 1500;
+-    let grid_width = 1500;
++    let grid_height = 3000;
++    let grid_width = 3000;
+     let grid_density = 1.0;
+     let timesteps = 100;
+ 
+-    let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
++    let active_traits: Vec<usize> = vec![0];
+ 
+     // Neighborhood mask
+     let neighborhood_traits_mask = vec![
+@@ -90,6 +89,7 @@ fn main() {
+     let rows_per_batch = std::cmp::max(1, 4000 / grid_width);
+ 
+     // Simulation loop
++    let start = Instant::now();
+     for _t in 1..=timesteps {
+         
+         // --- STEP 1: Update Traits (Double Buffering) ---
+diff --git a/trait_ac_ui/src/main.rs b/trait_ac_ui/src/main.rs
+index 81764dd..78799c4 100644
+--- a/trait_ac_ui/src/main.rs
++++ b/trait_ac_ui/src/main.rs
+@@ -5,8 +5,9 @@ use trait_ac::cell::Cell;
+ use trait_ac::neighborhood::Neighborhood;
+ use trait_ac::rules::{RulesRegistry, Rules, RuleFn};
+ use trait_ac::movement::{MovementRegistry, Movements, MovementFn};
+-use trait_ac::utils::{semantic_traits_names};
+ use rayon::prelude::*;
++use std::time::Instant;
++use trait_ac::utils::{semantic_traits_names, print_separator, print_active_traits};
+ 
+ 
+ 
+@@ -97,7 +98,10 @@ struct CAApp {
+     next_grid_cells: Vec<Vec<Cell>>,
+     
+     // Simulation state
++    initialized: bool,
+     timestep: usize,
++    timestep_max: usize,
++    start: Instant,
+     is_playing: bool,
+     steps_per_second: f32,
+     time_accumulator: f32,
+@@ -136,23 +140,23 @@ struct CAApp {
+ impl Default for CAApp {
+     fn default() -> Self {
+         // Configuration
+-        let grid_width = 500;
+-        let grid_height = 500;
+-        let steps_per_second = 25.0;
++        let grid_width = 3000;
++        let grid_height = 3000;
++        let steps_per_second = 10000.0;
+         let grid_density = 1.0;
+ 
+ 
+         let grid_width_min = 3;
+-        let grid_width_max = 1500;
++        let grid_width_max = 5000;
+ 
+         let grid_height_min = 3;
+-        let grid_height_max = 1500;
++        let grid_height_max = 5000;
+ 
+         let steps_per_second_min = 1.0;
+-        let steps_per_second_max = 500.0;
++        let steps_per_second_max = 10000.0;
+ 
+-        let cell_size = 3.0;
+-        let cell_size_min = 1.0;
++        let cell_size = 0.397;
++        let cell_size_min = 0.01;
+         let cell_size_max = 100.0;
+ 
+         let show_values = false;
+@@ -161,7 +165,7 @@ impl Default for CAApp {
+         let color_scheme = ColorScheme::Viridis;
+         let base_color_no_actor = 0.1;
+ 
+-        let active_traits: Vec<usize> = vec![0, 1, 2, 3, 4];
++        let active_traits: Vec<usize> = vec![0];
+         let initial_selected_trait = active_traits[0];
+ 
+         // Neighborhood mask
+@@ -232,8 +236,11 @@ impl Default for CAApp {
+             grid_density,
+             next_grid_cells,
+ 
++            initialized: false,
+             timestep: 0,
+-            is_playing: false,
++            timestep_max: 100,
++            start: Instant::now(),
++            is_playing: true,
+             steps_per_second,
+             time_accumulator: 0.0,
+             grid_texture: None,
+@@ -391,8 +398,35 @@ impl eframe::App for CAApp {
+             }
+         });
+ 
+-        // Handle animation
+-        if self.is_playing {
++        if self.timestep >= self.timestep_max {
++            println!("Simulation completed at timestep {}. Closing app.", self.timestep);
++            print_separator();
++            self.timestep_max = 200; // to avoid printing multiple times
++
++            println!("Configuration:");
++            println!("  Grid: {}x{}", self.grid_width, self.grid_height);
++            println!("  Timesteps: {}", self.timestep);
++
++            print_active_traits(&self.active_traits, &self.trait_names, &self.rules_registry);
++            
++            let elapsed = self.start.elapsed();
++            println!("\nExecution time: {:?}", elapsed);
++            println!(
++                "Performance: {:.2} timesteps/sec",
++                self.timestep as f64 / elapsed.as_secs_f64()
++            );
++            println!(
++                "Cells/sec: {:.2}M",
++                (self.grid_width * self.grid_height * self.timestep) as f64 / elapsed.as_secs_f64() / 1_000_000.0
++            );
++            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
++            return;
++        }
++
++        if !self.initialized {
++            self.initialized = true;
++            ctx.request_repaint();
++        } else if self.is_playing {  // Handle animation
+             self.time_accumulator += ctx.input(|i| i.stable_dt);
+             let step_duration = 1.0 / self.steps_per_second;
+             
+@@ -401,7 +435,7 @@ impl eframe::App for CAApp {
+             let target_frame_time = 1.0 / 60.0; // Target 60 FPS
+             
+             // Calculate how many steps we can afford this frame
+-            let max_steps = if frame_time > target_frame_time * 1.5 {
++            let max_steps = if self.timestep == 0 || frame_time > target_frame_time * 1.5 {
+                 1 // If we're lagging, only do 1 step per frame
+             } else {
+                 10 // Otherwise allow up to 10 steps per frame
