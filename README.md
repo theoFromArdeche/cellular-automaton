@@ -71,6 +71,10 @@ For comprehensive documentation including:
 
 **See [Technical Documentation.pdf](Technical%20Documentation.pdf)**
 
+⚠️ Links inside the PDF do not work in GitHub’s preview.
+Please download the PDF to access clickable links.
+
+
 ## Performance
 
 On a 3000×3000 grid (9 million cells) with Conway's Game of Life rules:
