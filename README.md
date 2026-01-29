@@ -83,8 +83,8 @@ On a 3000×3000 grid (9 million cells) with Conway's Game of Life rules:
 
 ## Disclaimer
 
-This project is a school project that was completed with a classmate. However, the topic
-was open-ended regarding automata, and my work far exceeds what was expected of me.
-This is why this repository contains only my work and not my colleague’s work, which I
-do not claim as my own, and I consider this project as a personal project rather than a
-school project.
+This project began as a school assignment completed with a classmate. However, the
+topic was open-ended regarding automata, and my contributions go well beyond what was
+required. For this reason, this repository contains only my own work and does not
+include my colleague’s contributions (since commit e1914c8), which I do not claim as my own. I consider this a
+personal project rather than a school project.
